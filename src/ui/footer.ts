@@ -4,6 +4,7 @@ import {
   type Component,
 } from "@earendil-works/pi-tui";
 
+import { sanitizeText } from "./sanitize.js";
 import { theme } from "./theme.js";
 
 export interface UsageTotals {
@@ -12,7 +13,7 @@ export interface UsageTotals {
   cost: number;
 }
 
-export type ChatState = "idle" | "working";
+export type ChatState = "idle" | "working" | "reconnecting";
 
 interface StatusFooterOptions {
   agent: string;
@@ -46,11 +47,11 @@ export function formatStatusFooter({
   usage,
   state,
 }: StatusFooterOptions): string {
-  const host = new URL(url).host;
-  return (
-    `${agent}@${host} · ${id} · ` +
-    `↑ ${tokenNumber.format(usage.input)} ↓ ${tokenNumber.format(usage.output)} · ` +
-    `$${usage.cost.toFixed(4)} · ${state}`
+  const origin = new URL(url).origin;
+  return sanitizeText(
+    `${agent}@${origin} · ${id} · ` +
+      `↑ ${tokenNumber.format(usage.input)} ↓ ${tokenNumber.format(usage.output)} · ` +
+      `$${usage.cost.toFixed(4)} · ${state}`,
   );
 }
 
@@ -74,6 +75,10 @@ export class StatusFooter implements Component {
       ...this.options,
       usage: accumulateUsage(this.options.usage, usage),
     };
+  }
+
+  resetUsage(): void {
+    this.options = { ...this.options, usage: emptyUsageTotals() };
   }
 
   invalidate(): void {}

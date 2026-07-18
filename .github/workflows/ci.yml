@@ -18,6 +18,13 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node dist/index.js --version
+      - name: Pack smoke test
+        run: |
+          smoke_dir=$(mktemp -d)
+          npm pack --cache "$smoke_dir/cache" --pack-destination "$smoke_dir"
+          tarball=$(find "$smoke_dir" -maxdepth 1 -name '*.tgz' -print -quit)
+          npm install --cache "$smoke_dir/cache" --prefix "$smoke_dir/install" "$tarball"
+          "$smoke_dir/install/node_modules/.bin/flue-tui" --version
 
   demo-agent:
     runs-on: ubuntu-latest

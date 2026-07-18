@@ -47,12 +47,16 @@ class FakeObservation implements AgentConversationObservation {
   }
 
   publish(conversation: FlueConversationState) {
-    this.snapshot = {
+    this.publishSnapshot({
       conversation,
       offset: "1",
       phase: "live",
       error: undefined,
-    };
+    });
+  }
+
+  publishSnapshot(snapshot: AgentConversationObservationSnapshot) {
+    this.snapshot = snapshot;
     for (const listener of this.listeners) {
       listener();
     }
@@ -63,7 +67,11 @@ function createFakeUi() {
   const transcript: TestBlock[] = [];
   const notices: string[] = [];
   const ids: string[] = [];
+  const reconnectingStates: boolean[] = [];
+  let recoveredMarkers = 0;
+  let usageResets = 0;
   let submit: ((text: string) => void) | undefined;
+  let input: ((data: string, text?: string) => void) | undefined;
 
   const ui: ChatUi<TestBlock> = {
     reconcileUi: {
@@ -100,8 +108,16 @@ function createFakeUi() {
       transcript.splice(0);
     },
     setBusy() {},
+    setReconnecting(reconnecting) {
+      reconnectingStates.push(reconnecting);
+    },
     recordUsage() {},
-    addRecoveredMarker() {},
+    resetUsage() {
+      usageResets++;
+    },
+    addRecoveredMarker() {
+      recoveredMarkers++;
+    },
     setToolsMode() {},
     toggleToolsExpanded() {},
     readLoop(handlers) {
@@ -111,6 +127,13 @@ function createFakeUi() {
           getText: () => text,
           setText() {},
         });
+      input = (data, text = "") => {
+        handlers.onInput(data, {
+          addToHistory() {},
+          getText: () => text,
+          setText() {},
+        });
+      };
       return () => undefined;
     },
     stop() {},
@@ -121,8 +144,18 @@ function createFakeUi() {
     transcript,
     notices,
     ids,
+    reconnectingStates,
+    get recoveredMarkers() {
+      return recoveredMarkers;
+    },
+    get usageResets() {
+      return usageResets;
+    },
     submit(text: string) {
       submit?.(text);
+    },
+    input(data: string, text?: string) {
+      input?.(data, text);
     },
   };
 }
@@ -270,6 +303,7 @@ describe("chat lifecycle", () => {
     expect(connectionFactory.mock.calls[0]?.[0].id).not.toBe(options.id);
     expect(fakeUi.ids).toEqual([connectionFactory.mock.calls[0]?.[0].id]);
     expect(fakeUi.transcript).toEqual([]);
+    expect(fakeUi.usageResets).toBe(1);
 
     nextObservation.publish({
       conversationId: "conversation-new",
@@ -286,5 +320,184 @@ describe("chat lifecycle", () => {
 
     fakeUi.submit("/exit");
     await expect(done).resolves.toBe(0);
+  });
+
+  it("shows one reconnecting notice per live connection loss", async () => {
+    const observation = new FakeObservation();
+    const connection = {
+      observe: vi.fn(() => observation),
+    } as unknown as FlueConnection;
+    const fakeUi = createFakeUi();
+    const done = createChatController({
+      options,
+      connection,
+      connectionFactory: vi.fn(() => connection),
+      ui: fakeUi.ui,
+    }).run();
+
+    observation.publish({
+      conversationId: "conversation-1",
+      settlements: [],
+      messages: [],
+    });
+    const reconnectingSnapshot: AgentConversationObservationSnapshot = {
+      conversation: observation.getSnapshot().conversation,
+      offset: "1",
+      phase: "connecting",
+      error: new Error("socket closed"),
+    };
+    observation.publishSnapshot(reconnectingSnapshot);
+    observation.publishSnapshot({
+      ...reconnectingSnapshot,
+      error: new Error("retry failed"),
+    });
+
+    expect(fakeUi.reconnectingStates.at(-1)).toBe(true);
+    expect(
+      fakeUi.notices.filter(
+        (notice) => notice === "connection lost — retrying",
+      ),
+    ).toHaveLength(1);
+
+    observation.publish({
+      conversationId: "conversation-1",
+      settlements: [],
+      messages: [],
+    });
+    expect(fakeUi.reconnectingStates.at(-1)).toBe(false);
+
+    fakeUi.submit("/exit");
+    await expect(done).resolves.toBe(0);
+  });
+
+  it("delays the initial unreachable-server notice for two seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const observation = new FakeObservation();
+      const connection = {
+        observe: vi.fn(() => observation),
+      } as unknown as FlueConnection;
+      const fakeUi = createFakeUi();
+      const done = createChatController({
+        options: { ...options, url: "https://flue.test/path?secret=value" },
+        connection,
+        connectionFactory: vi.fn(() => connection),
+        ui: fakeUi.ui,
+      }).run();
+
+      observation.publishSnapshot({
+        conversation: undefined,
+        offset: undefined,
+        phase: "connecting",
+        error: new Error("refused"),
+      });
+      expect(fakeUi.reconnectingStates.at(-1)).toBe(true);
+      expect(fakeUi.notices).not.toContain(
+        "cannot reach https://flue.test — retrying",
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fakeUi.notices).toContain(
+        "cannot reach https://flue.test — retrying",
+      );
+
+      fakeUi.submit("/exit");
+      await expect(done).resolves.toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses pre-admission wording when a local wait is interrupted early", async () => {
+    const observation = new FakeObservation();
+    const connection = {
+      observe: vi.fn(() => observation),
+      send: vi.fn(
+        (_message: string, sendOptions: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            sendOptions.signal?.addEventListener("abort", () =>
+              reject(new Error("locally aborted")),
+            );
+          }),
+      ),
+    } as unknown as FlueConnection;
+    const fakeUi = createFakeUi();
+    const done = createChatController({
+      options,
+      connection,
+      connectionFactory: vi.fn(() => connection),
+      ui: fakeUi.ui,
+    }).run();
+
+    fakeUi.submit("hello");
+    fakeUi.input("\u001b");
+
+    expect(fakeUi.notices).toContain(
+      "interrupted before server admission could be confirmed",
+    );
+    expect(fakeUi.notices).not.toContain(
+      "interrupted — agent keeps running server-side",
+    );
+
+    fakeUi.submit("/exit");
+    await expect(done).resolves.toBe(0);
+  });
+
+  it.each([
+    ["a completed settlement", true],
+    ["completed message parts alone", false],
+  ])("marks recovery only from %s", async (_case, hasSettlement) => {
+    try {
+      const observation = new FakeObservation();
+      const history = vi.fn().mockResolvedValue({
+        v: 1,
+        conversationId: "conversation-1",
+        offset: "2",
+        settlements: hasSettlement
+          ? [
+              {
+                submissionId: "submission-1",
+                outcome: "completed",
+              },
+            ]
+          : [],
+        messages: [
+          {
+            id: "assistant-1",
+            role: "assistant",
+            submissionId: "submission-1",
+            parts: [{ type: "text", text: "done", state: "done" }],
+          },
+        ],
+      });
+      const connection = {
+        observe: vi.fn(() => observation),
+        send: vi.fn().mockResolvedValue({
+          streamUrl: "https://flue.test/stream",
+          offset: "0",
+          submissionId: "submission-1",
+        }),
+        wait: vi.fn().mockRejectedValue(new TypeError("stream disconnected")),
+        history,
+      } as unknown as FlueConnection;
+      const fakeUi = createFakeUi();
+      const done = createChatController({
+        options,
+        connection,
+        connectionFactory: vi.fn(() => connection),
+        ui: fakeUi.ui,
+        recoveryDelay: vi.fn().mockResolvedValue(undefined),
+      }).run();
+
+      fakeUi.submit("hello");
+      await vi.waitFor(() => expect(history).toHaveBeenCalledOnce());
+
+      expect(fakeUi.recoveredMarkers).toBe(hasSettlement ? 1 : 0);
+
+      fakeUi.submit("/exit");
+      await expect(done).resolves.toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

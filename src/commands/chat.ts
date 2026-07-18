@@ -51,6 +51,7 @@ interface ChatControllerOptions<TBlock> {
   connection: FlueConnection;
   connectionFactory: (options: ConnectionOptions) => FlueConnection;
   ui: ChatUi<TBlock>;
+  recoveryDelay?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
 export interface ChatCommandDependencies<TBlock> {
@@ -99,6 +100,9 @@ export function createChatController<TBlock>({
   connection: initialConnection,
   connectionFactory,
   ui,
+  recoveryDelay = async (milliseconds, signal) => {
+    await delay(milliseconds, undefined, { signal });
+  },
 }: ChatControllerOptions<TBlock>) {
   let currentId = options.id;
   let connection = initialConnection;
@@ -109,6 +113,16 @@ export function createChatController<TBlock>({
   let finish!: (code: number) => void;
   let reconciler = createReconciler(ui.reconcileUi);
   let renderedMessageFingerprints = new Map<string, string>();
+  let reachedServer = false;
+  let reconnecting = false;
+  let reachabilityNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearReachabilityNoticeTimer = () => {
+    if (reachabilityNoticeTimer !== undefined) {
+      clearTimeout(reachabilityNoticeTimer);
+      reachabilityNoticeTimer = undefined;
+    }
+  };
 
   const rememberRenderedConversation = (conversation: Conversation) => {
     renderedMessageFingerprints = new Map(
@@ -120,6 +134,11 @@ export function createChatController<TBlock>({
   };
 
   const closeObservation = () => {
+    clearReachabilityNoticeTimer();
+    if (reconnecting) {
+      reconnecting = false;
+      ui.setReconnecting(false);
+    }
     removeObservationListener();
     removeObservationListener = () => undefined;
     observation?.close();
@@ -148,6 +167,7 @@ export function createChatController<TBlock>({
 
       const snapshot = nextObservation.getSnapshot();
       if (snapshot.conversation !== undefined) {
+        reachedServer = true;
         reconciler.reconcile(snapshot.conversation);
         rememberRenderedConversation(snapshot.conversation);
         ui.requestRender();
@@ -158,7 +178,41 @@ export function createChatController<TBlock>({
           );
         }
       } else if (snapshot.phase === "absent") {
+        reachedServer = true;
         resumeNoticePending = false;
+      }
+
+      if (snapshot.phase === "connecting" && snapshot.error !== undefined) {
+        if (!reconnecting) {
+          reconnecting = true;
+          ui.setReconnecting(true);
+          if (reachedServer) {
+            ui.addNotice("connection lost — retrying");
+          } else {
+            reachabilityNoticeTimer = setTimeout(() => {
+              reachabilityNoticeTimer = undefined;
+              const latest = nextObservation.getSnapshot();
+              if (
+                observation === nextObservation &&
+                reconnecting &&
+                !reachedServer &&
+                latest.phase === "connecting" &&
+                latest.error !== undefined
+              ) {
+                ui.addNotice(
+                  `cannot reach ${new URL(options.url).origin} — retrying`,
+                );
+              }
+            }, 2_000);
+          }
+        }
+      } else if (snapshot.phase === "live" || snapshot.phase === "absent") {
+        reachedServer = true;
+        clearReachabilityNoticeTimer();
+        if (reconnecting) {
+          reconnecting = false;
+          ui.setReconnecting(false);
+        }
       }
 
       if (
@@ -179,7 +233,7 @@ export function createChatController<TBlock>({
     submissionId: string,
   ) => {
     try {
-      await delay(2_000, undefined, { signal: wait.controller.signal });
+      await recoveryDelay(2_000, wait.controller.signal);
     } catch {
       return;
     }
@@ -196,6 +250,10 @@ export function createChatController<TBlock>({
       const snapshot = await waitConnection.history({
         signal: wait.controller.signal,
       });
+      const completedSettlement = snapshot.settlements.some(
+        (value) =>
+          value.submissionId === submissionId && value.outcome === "completed",
+      );
       const recoveredMessage = snapshot.messages.findLast(
         (message) =>
           message.submissionId === submissionId &&
@@ -203,6 +261,7 @@ export function createChatController<TBlock>({
       );
 
       if (
+        !completedSettlement ||
         recoveredMessage === undefined ||
         renderedMessageFingerprints.get(recoveredMessage.id) ===
           messageFingerprint(recoveredMessage)
@@ -308,7 +367,11 @@ export function createChatController<TBlock>({
     localWait.interrupted = true;
     localWait.controller.abort();
     if (showNotice) {
-      ui.addNotice("interrupted — agent keeps running server-side");
+      ui.addNotice(
+        localWait.submissionId === undefined
+          ? "interrupted before server admission could be confirmed"
+          : "interrupted — agent keeps running server-side",
+      );
     }
   };
 
@@ -326,6 +389,7 @@ export function createChatController<TBlock>({
     reconciler = createReconciler(ui.reconcileUi);
     renderedMessageFingerprints.clear();
     ui.clearTranscript();
+    ui.resetUsage();
     ui.setId(currentId);
     openObservation(false);
     ui.addNotice(

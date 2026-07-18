@@ -1,5 +1,7 @@
 import type { FlueConversationSettlement } from "@flue/sdk";
 
+import { sanitizeText } from "./ui/sanitize.js";
+
 type TerminalSettlement = Pick<
   FlueConversationSettlement,
   "submissionId" | "outcome" | "error"
@@ -7,17 +9,17 @@ type TerminalSettlement = Pick<
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    return sanitizeText(error.message);
   }
   if (typeof error === "object" && error !== null) {
     if ("message" in error && typeof error.message === "string") {
-      return error.message;
+      return sanitizeText(error.message);
     }
     if ("details" in error && typeof error.details === "string") {
-      return error.details;
+      return sanitizeText(error.details);
     }
   }
-  return String(error);
+  return sanitizeText(String(error));
 }
 
 export function formatPostAdmissionWaitError(options: {
@@ -29,8 +31,8 @@ export function formatPostAdmissionWaitError(options: {
 }): string {
   const { agent, id, submissionId, settlement, error } = options;
   const identity =
-    `agent "${agent}", instance id "${id}", ` +
-    `submissionId "${submissionId}"`;
+    `agent "${sanitizeText(agent)}", instance id "${sanitizeText(id)}", ` +
+    `submissionId "${sanitizeText(submissionId)}"`;
 
   if (settlement?.outcome === "failed") {
     return `submission failed for ${identity}: ${errorMessage(settlement.error ?? error)}`;

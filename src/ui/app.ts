@@ -17,6 +17,7 @@ import {
 import { createChatAutocompleteProvider } from "./commands.js";
 import { emptyUsageTotals, StatusFooter } from "./footer.js";
 import type { ReconcileUi } from "./reconcile.js";
+import { sanitizeText } from "./sanitize.js";
 import { theme } from "./theme.js";
 import { ToolBlock, type ToolDisplayMode } from "./tool-block.js";
 
@@ -49,7 +50,9 @@ export interface ChatUi<TBlock> {
   setId(id: string): void;
   clearTranscript(): void;
   setBusy(busy: boolean): void;
+  setReconnecting(reconnecting: boolean): void;
   recordUsage(usage: PromptUsage): void;
+  resetUsage(): void;
   addRecoveredMarker(): void;
   setToolsMode(mode: ToolDisplayMode): void;
   toggleToolsExpanded(): void;
@@ -64,25 +67,29 @@ export function createChatUi({
   id,
   tools,
 }: ChatUiOptions): ChatUi<Component> {
+  const origin = new URL(url).origin;
+  const safeAgent = sanitizeText(agent);
   const chatContainer = new Container();
   const statusArea = new Container();
   const editor = new Editor(tui, theme.editor);
   editor.setAutocompleteProvider(createChatAutocompleteProvider());
   const header = new Text(
-    theme.header(`flue-tui · ${agent}@${url} · ${id}`),
+    theme.header(`flue-tui · ${safeAgent}@${origin} · ${sanitizeText(id)}`),
     1,
     1,
   );
   const toolBlocks = new Map<string, ToolBlock>();
   const footer = new StatusFooter({
-    agent,
-    url,
+    agent: safeAgent,
+    url: origin,
     id,
     usage: emptyUsageTotals(),
     state: "idle",
   });
   let toolsMode = tools;
   let loader: Loader | undefined;
+  let busy = false;
+  let reconnecting = false;
 
   tui.addChild(header);
   tui.addChild(chatContainer);
@@ -99,7 +106,11 @@ export function createChatUi({
   };
 
   const setId = (nextId: string) => {
-    header.setText(theme.header(`flue-tui · ${agent}@${url} · ${nextId}`));
+    header.setText(
+      theme.header(
+        `flue-tui · ${safeAgent}@${origin} · ${sanitizeText(nextId)}`,
+      ),
+    );
     footer.setId(nextId);
     requestRender();
   };
@@ -110,9 +121,14 @@ export function createChatUi({
     requestRender();
   };
 
-  const setBusy = (busy: boolean) => {
-    footer.setState(busy ? "working" : "idle");
-    if (busy && loader === undefined) {
+  const updateFooterState = () => {
+    footer.setState(reconnecting ? "reconnecting" : busy ? "working" : "idle");
+  };
+
+  const setBusy = (nextBusy: boolean) => {
+    busy = nextBusy;
+    updateFooterState();
+    if (nextBusy && loader === undefined) {
       loader = new Loader(
         tui,
         theme.loader.spinner,
@@ -120,12 +136,18 @@ export function createChatUi({
         "waiting for agent…",
       );
       statusArea.addChild(loader);
-    } else if (!busy && loader !== undefined) {
+    } else if (!nextBusy && loader !== undefined) {
       loader.stop();
       statusArea.removeChild(loader);
       loader = undefined;
     }
 
+    requestRender();
+  };
+
+  const setReconnecting = (nextReconnecting: boolean) => {
+    reconnecting = nextReconnecting;
+    updateFooterState();
     requestRender();
   };
 
@@ -204,6 +226,11 @@ export function createChatUi({
     requestRender();
   };
 
+  const resetUsage = () => {
+    footer.resetUsage();
+    requestRender();
+  };
+
   const addRecoveredMarker = () => {
     chatContainer.addChild(new Text(theme.muted("(recovered)"), 1, 0));
     requestRender();
@@ -225,7 +252,9 @@ export function createChatUi({
     setId,
     clearTranscript,
     setBusy,
+    setReconnecting,
     recordUsage,
+    resetUsage,
     addRecoveredMarker,
     setToolsMode,
     toggleToolsExpanded,

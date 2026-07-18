@@ -37,4 +37,24 @@ describe("ToolBlock", () => {
     expect(block.render(80).join("\n")).toContain("search");
     expect(block.render(80).join("\n")).toContain('"query": "cats"');
   });
+
+  it("does not render terminal controls from tool data", () => {
+    const block = new ToolBlock(
+      {
+        type: "dynamic-tool",
+        toolCallId: "tool-1",
+        toolName: "\u001b[31msearch",
+        state: "output-error",
+        input: { query: "cats" },
+        errorText: "failed\u009b2J visibly",
+      },
+      "full",
+    );
+    const rendered = block.render(80).join("\n");
+
+    expect(rendered).toContain("search");
+    expect(rendered).toContain("failed visibly");
+    expect(rendered).not.toContain("\u001b[31msearch");
+    expect(rendered).not.toContain("\u009b2J");
+  });
 });

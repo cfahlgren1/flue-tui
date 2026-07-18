@@ -180,6 +180,44 @@ describe("runSendCommand", () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining("→ [2 items]"));
   });
 
+  it("sanitizes agent output written to progress stderr", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const wait = vi.fn().mockImplementation(async (_admission, options) => {
+      await options.onEvent?.({
+        type: "message-delta",
+        conversationId: "conversation-1",
+        messageId: "message-1",
+        kind: "text",
+        delta: "safe\u001b]52;c;c2VjcmV0\u0007 text",
+        position: { batch: 1, index: 1 },
+      });
+      await options.onEvent?.({
+        type: "tool-input",
+        toolCallId: "tool-1",
+        toolName: "\u001b[31msearch",
+        input: "\u001b_payload\u001b\\query",
+      });
+      return result;
+    });
+
+    await runSendCommand({
+      connection: createTestConnection({ wait }),
+      agent: "demo",
+      id: "instance-1",
+      message: "hello",
+      json: false,
+    });
+
+    const rendered = stderr.mock.calls.map(([value]) => String(value)).join("");
+    expect(rendered).toContain("safe text");
+    expect(rendered).toContain("tool search query");
+    expect(rendered).not.toContain("c2VjcmV0");
+    expect(rendered).not.toContain("\u001b[31msearch");
+  });
+
   it("writes the final text to piped stdout", async () => {
     const restoreTty = setStdoutTty(false);
     const stdout = vi
@@ -196,6 +234,30 @@ describe("runSendCommand", () => {
         json: false,
       });
       expect(stdout).toHaveBeenCalledWith("hello\n");
+    } finally {
+      restoreTty();
+    }
+  });
+
+  it("keeps piped stdout unsanitized", async () => {
+    const restoreTty = setStdoutTty(false);
+    const stdout = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const rawText = "answer\u001b[2Junchanged";
+
+    try {
+      await runSendCommand({
+        connection: createTestConnection({
+          wait: vi.fn().mockResolvedValue({ ...result, text: rawText }),
+        }),
+        agent: "demo",
+        id: "instance-1",
+        message: "hello",
+        json: false,
+      });
+      expect(stdout).toHaveBeenCalledWith(`${rawText}\n`);
     } finally {
       restoreTty();
     }
@@ -237,6 +299,34 @@ describe("runSendCommand", () => {
       }),
     ).resolves.toBe(130);
     expect(abort).not.toHaveBeenCalled();
+  });
+
+  it("reports when interruption happens before admission is confirmed", async () => {
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const send = vi.fn().mockImplementation(async () => {
+      process.emit("SIGINT");
+      throw new Error("locally aborted");
+    });
+
+    await expect(
+      runSendCommand({
+        connection: createTestConnection({ send }),
+        agent: "demo",
+        id: "instance-1",
+        message: "hello",
+        json: false,
+      }),
+    ).resolves.toBe(130);
+    expect(stderr).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "interrupted before server admission could be confirmed",
+      ),
+    );
+    expect(stderr).not.toHaveBeenCalledWith(
+      expect.stringContaining("agent keeps running server-side"),
+    );
   });
 
   it("prints durable submission details when waiting fails", async () => {

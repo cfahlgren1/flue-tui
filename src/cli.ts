@@ -6,6 +6,7 @@ import { resolveInvocation, type CliInvocation } from "./args.js";
 import { createConnection } from "./client.js";
 import { runChatCommand } from "./commands/chat.js";
 import { runSendCommand } from "./commands/send.js";
+import { sanitizeText } from "./ui/sanitize.js";
 
 const { version: VERSION } = createRequire(import.meta.url)(
   "../package.json",
@@ -56,7 +57,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     invocation = resolveInvocation(args);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`${chalk.red(`error: ${message}`)}\n`);
+    process.stderr.write(`${chalk.red(`error: ${sanitizeText(message)}`)}\n`);
     return 2;
   }
 
@@ -86,7 +87,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`${chalk.red(`error: ${message}`)}\n`);
+    process.stderr.write(`${chalk.red(`error: ${sanitizeText(message)}`)}\n`);
     return 1;
   }
 }

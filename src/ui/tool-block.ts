@@ -2,6 +2,7 @@ import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 
 import { summarize } from "./format.js";
 import type { ToolPart } from "./reconcile.js";
+import { sanitizeText } from "./sanitize.js";
 import { theme } from "./theme.js";
 
 const SUMMARY_MAX_LENGTH = 80;
@@ -14,7 +15,6 @@ export interface ToolBlockResult {
   ok: boolean;
   output?: unknown;
   errorMessage?: string;
-  durationMs?: number;
 }
 
 function prettyJson(value: unknown): string {
@@ -24,6 +24,10 @@ function prettyJson(value: unknown): string {
     const result = JSON.stringify(
       value,
       (_key, nestedValue: unknown) => {
+        if (typeof nestedValue === "string") {
+          return sanitizeText(nestedValue);
+        }
+
         if (typeof nestedValue === "bigint") {
           return `${nestedValue}n`;
         }
@@ -40,9 +44,9 @@ function prettyJson(value: unknown): string {
       2,
     );
 
-    return result ?? String(value);
+    return sanitizeText(result ?? String(value));
   } catch {
-    return String(value);
+    return sanitizeText(String(value));
   }
 }
 
@@ -93,7 +97,7 @@ export class ToolBlock extends Container {
   constructor(part: ToolPart, displayMode: ToolDisplayMode) {
     super();
     this.toolCallId = part.toolCallId;
-    this.initialToolName = part.toolName;
+    this.initialToolName = sanitizeText(part.toolName);
     this.input = part.input;
     this.displayMode = displayMode;
     this.applyPart(part);
@@ -104,21 +108,21 @@ export class ToolBlock extends Container {
   }
 
   private applyPart(part: ToolPart): void {
-    this.initialToolName = part.toolName;
+    this.initialToolName = sanitizeText(part.toolName);
     this.input = part.input;
     if (part.state === "input-available") {
       this.result = undefined;
     } else if (part.state === "output-available") {
       this.result = {
-        toolName: part.toolName,
+        toolName: sanitizeText(part.toolName),
         ok: true,
         output: part.output,
       };
     } else {
       this.result = {
-        toolName: part.toolName,
+        toolName: sanitizeText(part.toolName),
         ok: false,
-        errorMessage: part.errorText,
+        errorMessage: sanitizeText(part.errorText),
       };
     }
     this.rebuild();
@@ -151,21 +155,11 @@ export class ToolBlock extends Container {
         new Text(theme.toolRunning(`◌ tool ${toolName}${args}`), 1, 0),
       );
     } else if (this.result.ok) {
-      const duration =
-        this.result.durationMs === undefined
-          ? ""
-          : ` (${this.result.durationMs}ms)`;
       this.addChild(
-        new Text(theme.toolSuccess(`✓ ${toolName}${duration}`), 1, 0),
+        new Text(theme.toolSuccess(`✓ ${toolName}`), 1, 0),
       );
     } else {
-      const duration =
-        this.result.durationMs === undefined
-          ? ""
-          : ` (${this.result.durationMs}ms)`;
-      this.addChild(
-        new Text(theme.toolError(`✗ ${toolName}${duration}`), 1, 0),
-      );
+      this.addChild(new Text(theme.toolError(`✗ ${toolName}`), 1, 0));
     }
 
     if (this.displayMode === "full") {

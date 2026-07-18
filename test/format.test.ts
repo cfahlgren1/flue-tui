@@ -38,6 +38,16 @@ describe("summarize", () => {
     );
   });
 
+  it("strips terminal control sequences from summarized values", () => {
+    expect(summarize("safe\u001b]52;c;c2VjcmV0\u0007 text", 80)).toBe(
+      "safe text",
+    );
+    expect(summarize({ "\u001b[31mkey": "value" }, 80)).toBe("key=\"value\"");
+    expect(summarize({ query: "safe\u001b[31m text" }, 80)).toBe(
+      'query="safe text"',
+    );
+  });
+
   it("respects the total character budget", () => {
     const summary = summarize(
       { query: "a long search query", path: "/a/long/path/to/a/file" },

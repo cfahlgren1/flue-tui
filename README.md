@@ -1,6 +1,6 @@
 # flue-tui
 
-flue-tui is an interactive terminal chat client for any [Flue](https://flueframework.com) agent. It renders streaming responses and thinking, updates live tool-call blocks in place, resumes durable sessions, and keeps cumulative token usage and cost visible in the footer.
+flue-tui is an interactive terminal chat client for any [Flue](https://flueframework.com) agent. It renders streaming responses and thinking, updates live tool-call blocks in place, resumes durable sessions, and keeps token usage and cost visible in the footer.
 
 > Status: beta.
 
@@ -51,7 +51,7 @@ From the repository root in a second terminal:
 node dist/index.js --agent demo
 ```
 
-Send a message with Enter. The footer shows the target, session id, cumulative input and output tokens, cost, and current state.
+Send a message with Enter. The footer shows the target, session id, tokens and cost spent by this client process in the current session, and current state.
 
 ## Command-line reference
 
@@ -61,6 +61,15 @@ flue-tui [url] send <message> --agent <name> [send options]
 ```
 
 `[url]` defaults to `http://127.0.0.1:3583` and must appear before `send`. The one-shot `send` command streams response, thinking, and tool progress to stderr. It writes the final response to stdout when stdout is piped or redirected; `--json` always writes structured output.
+
+For authenticated agents, set `FLUE_TOKEN` as the primary authentication method:
+
+```sh
+export FLUE_TOKEN=your-bearer-token
+flue-tui --agent demo
+```
+
+Use `--token <bearer>` only when you need to override `FLUE_TOKEN` for one invocation.
 
 | Flag | Chat | Send | Description |
 | --- | :---: | :---: | --- |
@@ -76,7 +85,7 @@ flue-tui [url] send <message> --agent <name> [send options]
 
 | Environment variable | Description |
 | --- | --- |
-| `FLUE_TOKEN` | Default bearer token when `--token` is omitted |
+| `FLUE_TOKEN` | Primary bearer token for authenticated agents |
 
 | Exit code | Meaning |
 | ---: | --- |
@@ -90,12 +99,12 @@ flue-tui [url] send <message> --agent <name> [send options]
 | Key | Action |
 | --- | --- |
 | Enter | Submit the editor contents; non-command submissions are ignored while a turn is active |
-| Alt+Enter | Insert a newline |
+| Shift+Enter or Ctrl+J | Insert a newline |
 | Up / Down | Move through submitted message history |
-| Ctrl+C while working | Interrupt the local wait; the agent keeps running server-side |
+| Ctrl+C while working | Interrupt the local wait; admitted work keeps running server-side |
 | Ctrl+C with editor text | Clear the editor |
 | Ctrl+C with an empty, idle editor | Exit flue-tui |
-| Esc while working | Interrupt the local wait; the agent keeps running server-side |
+| Esc while working | Interrupt the local wait; admitted work keeps running server-side |
 | Ctrl+T | Toggle tool blocks between collapsed and full; hidden mode remains hidden |
 
 | Command | Action |
@@ -117,7 +126,7 @@ node dist/index.js --agent support --id ticket-42
 
 `/new` switches to a fresh id and clears the local transcript. The previous session remains on the server and can be resumed later with `--id`.
 
-Esc and Ctrl+C during an active turn interrupt only the local wait; server-side work continues. Use `/abort` to abort running and queued work for the current server session. If an admitted submission's wait stream disconnects, flue-tui keeps a recovery notice visible and performs one history refresh after two seconds; a completed response found there is rendered with a dim `(recovered)` marker.
+Esc and Ctrl+C during an active turn interrupt only the local wait. Once server admission is confirmed, server-side work continues; if interruption happens earlier, flue-tui reports that admission could not be confirmed. Use `/abort` to abort running and queued work for the current server session. If an admitted submission's wait stream disconnects, flue-tui keeps a recovery notice visible and performs one history refresh after two seconds; a response is rendered with a dim `(recovered)` marker only when the server reports a completed settlement for that submission.
 
 ## Architecture
 
@@ -152,6 +161,6 @@ GitHub Actions runs three jobs on pushes and pull requests:
 
 | Job | Checks |
 | --- | --- |
-| `ci` | Install, type-check, unit tests, build, and built CLI version smoke test |
+| `ci` | Install, type-check, unit tests, build, built CLI version smoke test, and packed-tarball smoke test |
 | `demo-agent` | Install and type-check `examples/demo-agent` |
 | `e2e` | Build the CLI and run the E2E suites with `E2E=1` |

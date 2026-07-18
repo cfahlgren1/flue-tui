@@ -3,6 +3,7 @@ import chalk from "chalk";
 
 import type { FlueConnection } from "../client.js";
 import { summarize } from "../ui/format.js";
+import { sanitizeText } from "../ui/sanitize.js";
 import { formatPostAdmissionWaitError } from "../wait-error.js";
 
 interface SendCommandOptions {
@@ -47,12 +48,12 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
             write(chalk.dim("thinking "));
             thinkingPrefixWritten = true;
           }
-          write(chalk.dim(event.delta));
+          write(chalk.dim(sanitizeText(event.delta)));
         } else {
           if (lastDeltaKind === "reasoning") {
             startLine();
           }
-          write(event.delta);
+          write(sanitizeText(event.delta));
         }
         lastDeltaKind = event.kind;
         break;
@@ -60,10 +61,12 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
       case "tool-input": {
         startLine();
         write(
-          chalk.dim(`tool ${event.toolName} ${summarize(event.input, 80)}\n`),
+          chalk.dim(
+            `tool ${sanitizeText(event.toolName)} ${summarize(event.input, 80)}\n`,
+          ),
         );
         activeTools.set(event.toolCallId, {
-          name: event.toolName,
+          name: sanitizeText(event.toolName),
           startedAt: Date.now(),
         });
         lastDeltaKind = undefined;
@@ -72,7 +75,7 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
       case "tool-output":
       case "tool-output-error": {
         const tool = activeTools.get(event.toolCallId);
-        const name = tool?.name ?? event.toolCallId;
+        const name = tool?.name ?? sanitizeText(event.toolCallId);
         const durationMs = tool ? Date.now() - tool.startedAt : 0;
         const status = event.type === "tool-output" ? "done" : "error";
         const result =
@@ -158,6 +161,7 @@ export async function runSendCommand({
   const controller = new AbortController();
   const progress = createProgressRenderer(process.stderr);
   let interrupted = false;
+  let admission: Awaited<ReturnType<FlueConnection["send"]>> | undefined;
 
   const handleSigint = () => {
     if (interrupted) {
@@ -172,25 +176,26 @@ export async function runSendCommand({
 
   try {
     if (!json && !idProvided) {
-      process.stderr.write(chalk.dim(`session ${id}\n`));
+      process.stderr.write(chalk.dim(`session ${sanitizeText(id)}\n`));
     }
 
-    const admission = await connection.send(message, {
+    const confirmedAdmission = await connection.send(message, {
       signal: controller.signal,
     });
+    admission = confirmedAdmission;
     let result: AgentPromptResponse;
     let settlement:
       | Extract<ConversationStreamChunk, { type: "submission-settled" }>
       | undefined;
 
     try {
-      result = await connection.wait(admission, {
+      result = await connection.wait(confirmedAdmission, {
         signal: controller.signal,
         onEvent: (event) => {
           progress.render(event);
           if (
             event.type === "submission-settled" &&
-            event.submissionId === admission.submissionId
+            event.submissionId === confirmedAdmission.submissionId
           ) {
             settlement = event;
           }
@@ -201,9 +206,9 @@ export async function runSendCommand({
       if (!interrupted) {
         process.stderr.write(
           `${formatPostAdmissionWaitError({
-            agent,
-            id,
-            submissionId: admission.submissionId,
+            agent: sanitizeText(agent),
+            id: sanitizeText(id),
+            submissionId: confirmedAdmission.submissionId,
             settlement,
             error,
           })}\n`,
@@ -216,12 +221,17 @@ export async function runSendCommand({
     writeResult(result, json, {
       agent,
       id,
-      submissionId: admission.submissionId,
+      submissionId: confirmedAdmission.submissionId,
     });
     return 0;
   } catch (error) {
     progress.finish();
     if (interrupted) {
+      const message =
+        admission === undefined
+          ? "interrupted before server admission could be confirmed"
+          : "interrupted — agent keeps running server-side";
+      process.stderr.write(`${chalk.dim(message)}\n`);
       return 130;
     }
     throw error;

@@ -93,6 +93,16 @@ describe("parseCliArgs", () => {
     },
   );
 
+  it.each([
+    "https://user@flue.example.test",
+    "https://user:secret@flue.example.test",
+    "https://:secret@flue.example.test",
+  ])("rejects URL credentials in %s", (url) => {
+    expect(() =>
+      parseCliArgs([url, "send", "hello", "--agent", "demo"]),
+    ).toThrow("must not include credentials");
+  });
+
   it("rejects empty agent and instance ids", () => {
     expect(() => parseCliArgs(["send", "hello", "--agent", ""])).toThrow(
       "--agent cannot be empty",
@@ -114,6 +124,10 @@ describe("main", () => {
     ["unknown option", ["--unknown"]],
     ["missing send message", ["send", "--agent", "demo"]],
     ["invalid URL", ["not-a-url", "send", "hello", "--agent", "demo"]],
+    [
+      "URL credentials",
+      ["https://user:secret@flue.test", "send", "hello", "--agent", "demo"],
+    ],
     ["chat --json", ["--agent", "demo", "--json"]],
     [
       "send --tools",
@@ -149,5 +163,22 @@ describe("main", () => {
     expect(write.mock.calls[0]?.[0]).toContain(
       "cd examples/demo-agent && npm run dev; then flue-tui --agent demo",
     );
+  });
+
+  it("does not echo URL credentials in usage errors", async () => {
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    await expect(
+      main([
+        "https://user:secret@flue.test",
+        "send",
+        "hello",
+        "--agent",
+        "demo",
+      ]),
+    ).resolves.toBe(2);
+    expect(String(write.mock.calls[0]?.[0])).not.toContain("secret");
   });
 });

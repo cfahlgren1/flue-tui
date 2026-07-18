@@ -1,3 +1,5 @@
+import { sanitizeText } from "./sanitize.js";
+
 function truncate(value: string, maxLen: number): string {
   if (maxLen <= 0) {
     return "";
@@ -15,7 +17,7 @@ function truncate(value: string, maxLen: number): string {
 }
 
 function compactString(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return sanitizeText(value).replace(/\s+/g, " ").trim();
 }
 
 function formatPrimitive(value: unknown): string {
@@ -68,5 +70,5 @@ export function summarize(value: unknown, maxLen: number): string {
     summary = formatPrimitive(value);
   }
 
-  return truncate(summary, Math.max(0, Math.floor(maxLen)));
+  return truncate(sanitizeText(summary), Math.max(0, Math.floor(maxLen)));
 }

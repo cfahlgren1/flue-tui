@@ -86,6 +86,10 @@ function validateUrl(value: string): string {
     throw new Error(`invalid URL "${value}": expected an http(s) URL`);
   }
 
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new Error("invalid URL: must not include credentials");
+  }
+
   return value;
 }
 

@@ -74,7 +74,9 @@ function createHeadlessUi() {
     setBusy(nextBusy) {
       busy = nextBusy;
     },
+    setReconnecting() {},
     recordUsage() {},
+    resetUsage() {},
     addRecoveredMarker() {},
     setToolsMode() {},
     toggleToolsExpanded() {},

@@ -5,9 +5,11 @@
     "target": "ES2023",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src", "test"]
+  "include": ["src"]
 }

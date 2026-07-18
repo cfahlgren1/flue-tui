@@ -48,7 +48,21 @@ describe("status footer", () => {
         state: "working",
       }),
     ).toBe(
-      "demo@127.0.0.1:3583 · tui-test · ↑ 1,234 ↓ 256 · $0.0123 · working",
+      "demo@http://127.0.0.1:3583 · tui-test · ↑ 1,234 ↓ 256 · $0.0123 · working",
+    );
+  });
+
+  it("displays only the URL origin and supports reconnecting state", () => {
+    expect(
+      formatStatusFooter({
+        agent: "demo",
+        url: "https://flue.test/api?secret=value",
+        id: "tui-test",
+        usage: emptyUsageTotals(),
+        state: "reconnecting",
+      }),
+    ).toBe(
+      "demo@https://flue.test · tui-test · ↑ 0 ↓ 0 · $0.0000 · reconnecting",
     );
   });
 
@@ -66,5 +80,22 @@ describe("status footer", () => {
     expect(lines).toHaveLength(1);
     expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(32);
     expect(lines[0]).toContain("\u001b[");
+  });
+
+  it("can reset accumulated usage", () => {
+    const footer = new StatusFooter({
+      agent: "demo",
+      url: "http://127.0.0.1:3583",
+      id: "tui-test",
+      usage: emptyUsageTotals(),
+      state: "idle",
+    });
+    footer.recordUsage(usage(12, 4, 0.25));
+
+    footer.resetUsage();
+
+    expect(footer.render(200).join("\n")).toContain(
+      "↑ 0 ↓ 0 · $0.0000",
+    );
   });
 });

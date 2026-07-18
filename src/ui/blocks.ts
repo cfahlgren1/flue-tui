@@ -1,5 +1,6 @@
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
+import { sanitizeText } from "./sanitize.js";
 import { theme } from "./theme.js";
 
 export class UserMessageBlock extends Container {
@@ -7,7 +8,7 @@ export class UserMessageBlock extends Container {
 
   constructor(text: string) {
     super();
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -15,7 +16,7 @@ export class UserMessageBlock extends Container {
     if (this.text === text) {
       return;
     }
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -30,7 +31,7 @@ export class AssistantMessageBlock extends Container {
 
   constructor(text: string) {
     super();
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -38,7 +39,7 @@ export class AssistantMessageBlock extends Container {
     if (this.text === text) {
       return;
     }
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -57,7 +58,7 @@ export class ReasoningBlock extends Container {
 
   constructor(text: string) {
     super();
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -65,7 +66,7 @@ export class ReasoningBlock extends Container {
     if (this.text === text) {
       return;
     }
-    this.text = text;
+    this.text = sanitizeText(text);
     this.rebuild();
   }
 
@@ -85,6 +86,10 @@ export class ReasoningBlock extends Container {
 
 export class NoticeBlock extends Text {
   constructor(text: string) {
-    super(theme.notice(text.replace(/\s+/g, " ").trim()), 1, 1);
+    super(
+      theme.notice(sanitizeText(text).replace(/\s+/g, " ").trim()),
+      1,
+      1,
+    );
   }
 }
