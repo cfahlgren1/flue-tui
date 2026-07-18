@@ -22,20 +22,24 @@ export {
 
 function printUsage() {
   console.log(`Usage:
-  flue-tui [url] --agent <name> [chat options]
-  flue-tui [url] send <message> --agent <name> [send options]
+  flue-tui <agent> [chat options]
+  flue-tui <agent> <message> [send options]
+
+Arguments:
+  <agent>          agent name (required)
+  <message>        message to send once; omit for interactive chat
 
 Shared options:
-  --agent <name>    agent name (required for chat and send)
-  --id <id>         persistent agent instance id
-  --token <bearer>  bearer token
-  --header k=v      additional request header (repeatable)
+  --server <url>, -s <url>  Flue server (default: http://127.0.0.1:3583)
+  --id <id>                 persistent agent instance id
+  --token <bearer>          bearer token
+  --header k=v              additional request header (repeatable)
 
 Chat options:
-  --tools <mode>    tool blocks: collapsed, full, or hidden (default: collapsed)
+  --tools <mode>            tool blocks: collapsed, full, or hidden (default: collapsed)
 
 Send options:
-  --json            print the final result as JSON
+  --json                    print the final result as JSON
 
 Other options:
   --help, -h

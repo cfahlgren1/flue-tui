@@ -15,9 +15,9 @@ Requires Node.js 22.19+ and a running Flue app with an agent that exports `route
 ## Use
 
 ```sh
-flue-tui --agent demo                          # chat (url defaults to http://127.0.0.1:3583)
-flue-tui https://my-app.dev --agent support --id ticket-42   # resume a durable session
-flue-tui send "what changed today?" --agent support --json   # one-shot, pipe-friendly
+flue-tui demo                                              # chat (server defaults to http://127.0.0.1:3583)
+flue-tui support --server https://my-app.dev --id ticket-42 # resume a durable session
+flue-tui support "what changed today?" --json              # one-shot, pipe-friendly
 ```
 
 For authenticated agents set `FLUE_TOKEN` (or `--token` / repeatable `--header k=v`). `--tools collapsed|full|hidden` controls tool-call display.
@@ -34,7 +34,7 @@ export ANTHROPIC_API_KEY=your-key   # or ANTHROPIC_BASE_URL for a gateway
 npm run dev                          # serves the demo agent on :3583
 ```
 
-Then in another terminal: `flue-tui --agent demo`.
+Then in another terminal: `flue-tui demo`.
 
 ## How it works
 

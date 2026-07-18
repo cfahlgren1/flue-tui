@@ -5,10 +5,12 @@ import type { ToolDisplayMode } from "./ui/tool-block.js";
 
 const DEFAULT_URL = "http://127.0.0.1:3583";
 const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+const MISSING_AGENT_ERROR =
+  "agent is required; usage: flue-tui <agent> [<message>]; quickstart: " +
+  "cd examples/demo-agent && npm run dev; then flue-tui demo";
 
 export interface ParsedCliArgs {
   url: string;
-  command?: "send";
   message?: string;
   agent?: string;
   id: string;
@@ -94,11 +96,11 @@ function validateUrl(value: string): string {
 }
 
 export function parseCliArgs(args: string[]): ParsedCliArgs {
-  const { values, positionals } = parseArgs({
+  const { values, positionals, tokens } = parseArgs({
     args,
     allowPositionals: true,
     options: {
-      agent: { type: "string" },
+      server: { type: "string", short: "s", default: DEFAULT_URL },
       id: { type: "string" },
       token: { type: "string" },
       header: { type: "string", multiple: true },
@@ -108,44 +110,32 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       tools: { type: "string", default: "collapsed" },
     },
     strict: true,
+    tokens: true,
   });
 
-  const remaining = [...positionals];
-  const url = validateUrl(
-    remaining[0] === "send" ? DEFAULT_URL : (remaining.shift() ?? DEFAULT_URL),
+  if (positionals.length > 2) {
+    throw new Error("flue-tui accepts at most two positional arguments");
+  }
+
+  const [agent, message] = positionals;
+  const toolsProvided = tokens.some(
+    (token) => token.kind === "option" && token.name === "tools",
   );
-  const command = remaining.shift();
-  const toolsProvided = args.some(
-    (arg) => arg === "--tools" || arg.startsWith("--tools="),
-  );
 
-  if (command !== undefined && command !== "send") {
-    throw new Error(`unknown command "${command}"`);
-  }
-
-  const message = remaining.shift();
-  if (remaining.length > 0) {
-    throw new Error("send accepts exactly one message argument");
-  }
-
-  if (command === "send" && message === undefined && !values.help) {
-    throw new Error("send requires a message");
-  }
-
-  if (command === "send" && values.agent === undefined && !values.help) {
-    throw new Error("send requires --agent <name>");
-  }
-
-  if (command === "send" && toolsProvided) {
+  if (message !== undefined && toolsProvided) {
     throw new Error("--tools is only available for chat");
   }
 
-  if (command === undefined && values.json) {
+  if (message === undefined && values.json) {
     throw new Error("--json is only available for send");
   }
 
-  if (values.agent !== undefined && values.agent.trim().length === 0) {
-    throw new Error("--agent cannot be empty");
+  if (agent !== undefined && agent.trim().length === 0) {
+    throw new Error("agent cannot be empty");
+  }
+
+  if (agent === undefined && !values.help) {
+    throw new Error(MISSING_AGENT_ERROR);
   }
 
   if (values.id !== undefined && values.id.trim().length === 0) {
@@ -163,10 +153,9 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   }
 
   return {
-    url,
-    command,
+    url: validateUrl(values.server),
     message,
-    agent: values.agent,
+    agent,
     id: values.id ?? generateId(),
     idProvided: values.id !== undefined,
     token: values.token ?? process.env.FLUE_TOKEN,
@@ -185,7 +174,7 @@ export function resolveInvocation(args: string[]): CliInvocation {
     return { kind: "help" };
   }
 
-  if (parsed.command === "send") {
+  if (parsed.message !== undefined) {
     return {
       kind: "send",
       url: parsed.url,
@@ -200,10 +189,7 @@ export function resolveInvocation(args: string[]): CliInvocation {
   }
 
   if (parsed.agent === undefined) {
-    throw new Error(
-      "chat requires --agent <name>; quickstart: " +
-        "cd examples/demo-agent && npm run dev; then flue-tui --agent demo",
-    );
+    throw new Error(MISSING_AGENT_ERROR);
   }
 
   return {

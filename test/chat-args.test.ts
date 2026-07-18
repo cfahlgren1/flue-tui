@@ -6,9 +6,9 @@ describe("resolveInvocation", () => {
   it("routes a no-subcommand invocation to chat", () => {
     expect(
       resolveInvocation([
-        "https://flue.example.test/api",
-        "--agent",
         "demo",
+        "--server",
+        "https://flue.example.test/api",
         "--id",
         "instance-1",
         "--token",
@@ -29,25 +29,26 @@ describe("resolveInvocation", () => {
   });
 
   it("passes the initial tool display mode to chat", () => {
-    expect(
-      resolveInvocation(["--agent", "demo", "--tools", "full"]),
-    ).toMatchObject({ kind: "chat", tools: "full" });
+    expect(resolveInvocation(["demo", "--tools", "full"])).toMatchObject({
+      kind: "chat",
+      tools: "full",
+    });
   });
 
   it("does not resume chat when the instance id was generated", () => {
-    expect(resolveInvocation(["--agent", "demo"])).toMatchObject({
+    expect(resolveInvocation(["demo"])).toMatchObject({
       kind: "chat",
       resume: false,
     });
   });
 
   it("requires an agent for chat", () => {
-    expect(() => resolveInvocation([])).toThrow("chat requires --agent <name>");
+    expect(() => resolveInvocation([])).toThrow("flue-tui <agent>");
   });
 
-  it("keeps send routed separately", () => {
+  it("routes a second positional to send", () => {
     expect(
-      resolveInvocation(["send", "hello", "--agent", "demo", "--id", "one"]),
+      resolveInvocation(["demo", "hello", "--id", "one"]),
     ).toMatchObject({
       kind: "send",
       agent: "demo",
@@ -56,22 +57,23 @@ describe("resolveInvocation", () => {
     });
   });
 
+  it("treats an empty second positional as send mode", () => {
+    expect(resolveInvocation(["demo", ""])).toMatchObject({
+      kind: "send",
+      agent: "demo",
+      message: "",
+    });
+  });
+
   it("rejects --json for chat", () => {
-    expect(() => resolveInvocation(["--agent", "demo", "--json"])).toThrow(
+    expect(() => resolveInvocation(["demo", "--json"])).toThrow(
       "--json is only available for send",
     );
   });
 
   it("rejects --tools for send", () => {
     expect(() =>
-      resolveInvocation([
-        "send",
-        "hello",
-        "--agent",
-        "demo",
-        "--tools",
-        "full",
-      ]),
+      resolveInvocation(["demo", "hello", "--tools", "full"]),
     ).toThrow("--tools is only available for chat");
   });
 });
