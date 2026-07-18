@@ -8,6 +8,8 @@ import type { FlueConnection } from "../client.js";
 
 interface SendCommandOptions {
   connection: FlueConnection;
+  agent: string;
+  id: string;
   message: string;
   json: boolean;
 }
@@ -109,18 +111,21 @@ function writeResult(result: AgentPromptResponse, json: boolean) {
     return;
   }
 
-  process.stdout.write(`${result.text}\n`);
+  if (!process.stdout.isTTY) {
+    process.stdout.write(`${result.text}\n`);
+  }
 }
 
 export async function runSendCommand({
   connection,
+  agent,
+  id,
   message,
   json,
 }: SendCommandOptions): Promise<number> {
   const controller = new AbortController();
   const progress = createProgressRenderer(process.stderr);
   let interrupted = false;
-  let abortRequest: Promise<unknown> | undefined;
 
   const handleSigint = () => {
     if (interrupted) {
@@ -129,7 +134,6 @@ export async function runSendCommand({
 
     interrupted = true;
     controller.abort();
-    abortRequest = connection.abort().catch(() => undefined);
   };
 
   process.once("SIGINT", handleSigint);
@@ -138,10 +142,21 @@ export async function runSendCommand({
     const admission = await connection.send(message, {
       signal: controller.signal,
     });
-    const result = await connection.wait(admission, {
-      signal: controller.signal,
-      onEvent: progress.render,
-    });
+    let result: AgentPromptResponse;
+
+    try {
+      result = await connection.wait(admission, {
+        signal: controller.signal,
+        onEvent: progress.render,
+      });
+    } catch (error) {
+      progress.finish();
+      process.stderr.write(
+        `wait failed for agent "${agent}", instance id "${id}", submissionId "${admission.submissionId}"; ` +
+          "the durable submission may still be running and can be observed by re-running against the same instance id.\n",
+      );
+      throw error;
+    }
 
     progress.finish();
     writeResult(result, json);
@@ -149,7 +164,6 @@ export async function runSendCommand({
   } catch (error) {
     progress.finish();
     if (interrupted) {
-      await abortRequest;
       return 130;
     }
     throw error;

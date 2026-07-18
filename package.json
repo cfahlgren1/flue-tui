@@ -7,14 +7,18 @@
   "bin": {
     "flue-tui": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.80.10",

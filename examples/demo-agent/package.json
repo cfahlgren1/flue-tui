@@ -6,7 +6,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "dev": "flue dev --target node --port 3583",
+    "dev": "flue dev --port 3583",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 
 import chalk from "chalk";
@@ -8,6 +9,9 @@ import { runSendCommand } from "./commands/send.js";
 
 const DEFAULT_URL = "http://127.0.0.1:3583";
 const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+const { version: VERSION } = createRequire(import.meta.url)(
+  "../package.json",
+) as { version: string };
 
 export interface ParsedCliArgs {
   url: string;
@@ -50,6 +54,22 @@ function parseHeaders(values: string[] | undefined): Record<string, string> {
   return headers;
 }
 
+function validateUrl(value: string): string {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`invalid URL "${value}": expected an http(s) URL`);
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`invalid URL "${value}": expected an http(s) URL`);
+  }
+
+  return value;
+}
+
 export function parseCliArgs(args: string[]): ParsedCliArgs {
   const { values, positionals } = parseArgs({
     args,
@@ -67,10 +87,11 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   });
 
   const remaining = [...positionals];
-  const url =
+  const url = validateUrl(
     remaining[0] === "send"
       ? DEFAULT_URL
-      : (remaining.shift() ?? DEFAULT_URL);
+      : (remaining.shift() ?? DEFAULT_URL),
+  );
   const command = remaining.shift();
 
   if (command !== undefined && command !== "send") {
@@ -90,13 +111,21 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     throw new Error("send requires --agent <name>");
   }
 
+  if (values.agent !== undefined && values.agent.trim().length === 0) {
+    throw new Error("--agent cannot be empty");
+  }
+
+  if (values.id !== undefined && values.id.trim().length === 0) {
+    throw new Error("--id cannot be empty");
+  }
+
   return {
     url,
     command,
     message,
     agent: values.agent,
     id: values.id ?? generateId(),
-    token: values.token,
+    token: values.token ?? process.env.FLUE_TOKEN,
     headers: parseHeaders(values.header),
     json: values.json,
     help: values.help,
@@ -119,14 +148,25 @@ Options:
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
+  const optionBoundary = args.indexOf("--");
+  const options = optionBoundary === -1 ? args : args.slice(0, optionBoundary);
+
+  if (options.includes("--version")) {
+    console.log(VERSION);
+    return 0;
+  }
+
+  let parsed: ParsedCliArgs;
+
   try {
-    const parsed = parseCliArgs(args);
+    parsed = parseCliArgs(args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${chalk.red(`error: ${message}`)}\n`);
+    return 2;
+  }
 
-    if (parsed.version) {
-      console.log("0.0.1");
-      return 0;
-    }
-
+  try {
     if (parsed.help || parsed.command === undefined) {
       printUsage();
       return 0;
@@ -140,6 +180,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         token: parsed.token,
         headers: parsed.headers,
       }),
+      agent: parsed.agent!,
+      id: parsed.id,
       message: parsed.message!,
       json: parsed.json,
     });

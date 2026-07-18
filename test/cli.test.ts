@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
 
-import { parseCliArgs } from "../src/cli.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { main, parseCliArgs } from "../src/cli.js";
+
+const { version } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("parseCliArgs", () => {
   it("uses the local Flue URL by default", () => {
@@ -32,5 +43,72 @@ describe("parseCliArgs", () => {
     const args = parseCliArgs(["send", "hello", "--agent", "demo"]);
 
     expect(args.id).toMatch(/^tui-[a-z0-9]{8}$/);
+  });
+
+  it("uses FLUE_TOKEN when --token is omitted", () => {
+    vi.stubEnv("FLUE_TOKEN", "env-secret");
+
+    const args = parseCliArgs(["send", "hello", "--agent", "demo"]);
+
+    expect(args.token).toBe("env-secret");
+  });
+
+  it("prefers --token over FLUE_TOKEN", () => {
+    vi.stubEnv("FLUE_TOKEN", "env-secret");
+
+    const args = parseCliArgs([
+      "send",
+      "hello",
+      "--agent",
+      "demo",
+      "--token",
+      "cli-secret",
+    ]);
+
+    expect(args.token).toBe("cli-secret");
+  });
+
+  it.each([
+    "not-a-url",
+    "ftp://flue.example.test",
+    "file:///tmp/flue.sock",
+  ])("rejects the invalid URL %s", (url) => {
+    expect(() =>
+      parseCliArgs([url, "send", "hello", "--agent", "demo"]),
+    ).toThrow(/http\(s\) URL/);
+  });
+
+  it("rejects empty agent and instance ids", () => {
+    expect(() =>
+      parseCliArgs(["send", "hello", "--agent", ""]),
+    ).toThrow("--agent cannot be empty");
+    expect(() =>
+      parseCliArgs(["send", "hello", "--agent", "demo", "--id", ""]),
+    ).toThrow("--id cannot be empty");
+  });
+
+  it("rejects extra send positionals", () => {
+    expect(() =>
+      parseCliArgs(["send", "hello", "extra", "--agent", "demo"]),
+    ).toThrow("send accepts exactly one message argument");
+  });
+});
+
+describe("main", () => {
+  it.each([
+    ["unknown option", ["--unknown"]],
+    ["missing send message", ["send", "--agent", "demo"]],
+    ["invalid URL", ["not-a-url", "send", "hello", "--agent", "demo"]],
+  ])("returns exit code 2 for %s", async (_name, args) => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(main(args)).resolves.toBe(2);
+  });
+
+  it("prints the package version regardless of other arguments", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(main(["--unknown", "--version"])).resolves.toBe(0);
+    expect(log).toHaveBeenCalledWith(version);
   });
 });

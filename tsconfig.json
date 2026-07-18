@@ -4,10 +4,9 @@
     "moduleResolution": "NodeNext",
     "target": "ES2023",
     "strict": true,
-    "outDir": "dist",
-    "rootDir": "src",
+    "noEmit": true,
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

@@ -40,36 +40,20 @@ const getTime = defineTool({
   run({ input }) {
     const now = new Date();
 
-    if (!input.timezone) return now.toISOString();
-
-    try {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat("en-CA", {
-          timeZone: input.timezone,
-          calendar: "iso8601",
-          numberingSystem: "latn",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          fractionalSecondDigits: 3,
-          hourCycle: "h23",
-          timeZoneName: "longOffset",
-        })
-          .formatToParts(now)
-          .map(({ type, value }) => [type, value]),
-      );
-      const offset =
-        parts.timeZoneName === "GMT"
-          ? "Z"
-          : parts.timeZoneName.replace("GMT", "");
-
-      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${parts.fractionalSecond}${offset}`;
-    } catch {
-      return `Invalid timezone: ${input.timezone}`;
+    if (input.timezone) {
+      try {
+        new Intl.DateTimeFormat(undefined, { timeZone: input.timezone });
+      } catch {
+        throw new Error(`Invalid timezone: ${input.timezone}`);
+      }
     }
+
+    const local = now.toLocaleString("en-US", {
+      timeZone: input.timezone,
+      timeZoneName: "short",
+    });
+
+    return `${local} (${now.toISOString()})`;
   },
 });
 
