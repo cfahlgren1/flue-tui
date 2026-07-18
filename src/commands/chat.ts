@@ -21,8 +21,12 @@ import type {
 } from "@flue/sdk";
 
 import { generateId } from "../args.js";
-import { createConnection, type ConnectionOptions } from "../client.js";
-import { createChatUi } from "../ui/app.js";
+import {
+  createConnection,
+  type ConnectionOptions,
+  type FlueConnection,
+} from "../client.js";
+import { createChatUi, type ChatUi } from "../ui/app.js";
 import { helpLines, isToolDisplayMode } from "../ui/commands.js";
 import { createReconciler } from "../ui/reconcile.js";
 import type { ToolDisplayMode } from "../ui/tool-block.js";
@@ -37,9 +41,21 @@ interface LocalWait {
   submissionId?: string;
 }
 
-interface ChatCommandOptions extends ConnectionOptions {
+export interface ChatCommandOptions extends ConnectionOptions {
   tools: ToolDisplayMode;
   resume: boolean;
+}
+
+interface ChatControllerOptions<TBlock> {
+  options: ChatCommandOptions;
+  connection: FlueConnection;
+  connectionFactory: (options: ConnectionOptions) => FlueConnection;
+  ui: ChatUi<TBlock>;
+}
+
+export interface ChatCommandDependencies<TBlock> {
+  connectionFactory?: (options: ConnectionOptions) => FlueConnection;
+  uiFactory: (options: ChatCommandOptions) => ChatUi<TBlock>;
 }
 
 type Conversation = FlueConversationSnapshot | FlueConversationState;
@@ -78,13 +94,14 @@ export function shouldIgnoreChatInput(data: string): boolean {
   return isKeyRelease(data);
 }
 
-export async function runChatCommand(
-  options: ChatCommandOptions,
-): Promise<number> {
+export function createChatController<TBlock>({
+  options,
+  connection: initialConnection,
+  connectionFactory,
+  ui,
+}: ChatControllerOptions<TBlock>) {
   let currentId = options.id;
-  let connection = createConnection(options);
-  const tui = new TUI(new ProcessTerminal());
-  const ui = createChatUi({ tui, ...options });
+  let connection = initialConnection;
   let localWait: LocalWait | undefined;
   let observation: AgentConversationObservation | undefined;
   let removeObservationListener: () => void = () => undefined;
@@ -114,7 +131,7 @@ export async function runChatCommand(
       removeInputListener();
       closeObservation();
       ui.setBusy(false);
-      tui.stop();
+      ui.stop();
       resolve(code);
     };
   });
@@ -305,7 +322,7 @@ export async function runChatCommand(
 
     closeObservation();
     currentId = generateId();
-    connection = createConnection({ ...options, id: currentId });
+    connection = connectionFactory({ ...options, id: currentId });
     reconciler = createReconciler(ui.reconcileUi);
     renderedMessageFingerprints.clear();
     ui.clearTranscript();
@@ -422,7 +439,7 @@ export async function runChatCommand(
         cancelLocalWait();
       } else if (editor.getText().length > 0) {
         editor.setText("");
-        tui.requestRender();
+        ui.requestRender();
       } else {
         finish(0);
       }
@@ -431,5 +448,37 @@ export async function runChatCommand(
     },
   });
 
-  return done;
+  return { run: () => done };
+}
+
+export function runChatCommand(
+  options: ChatCommandOptions,
+): Promise<number>;
+export function runChatCommand<TBlock>(
+  options: ChatCommandOptions,
+  dependencies: ChatCommandDependencies<TBlock>,
+): Promise<number>;
+export async function runChatCommand<TBlock>(
+  options: ChatCommandOptions,
+  dependencies?: ChatCommandDependencies<TBlock>,
+): Promise<number> {
+  if (dependencies !== undefined) {
+    const connectionFactory =
+      dependencies.connectionFactory ?? createConnection;
+    return createChatController({
+      options,
+      connection: connectionFactory(options),
+      connectionFactory,
+      ui: dependencies.uiFactory(options),
+    }).run();
+  }
+
+  const tui = new TUI(new ProcessTerminal());
+  const ui = createChatUi({ tui, ...options });
+  return createChatController({
+    options,
+    connection: createConnection(options),
+    connectionFactory: createConnection,
+    ui,
+  }).run();
 }

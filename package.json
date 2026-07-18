@@ -18,6 +18,7 @@
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "vitest run test/e2e --fileParallelism=false",
     "prepack": "pnpm build"
   },
   "dependencies": {

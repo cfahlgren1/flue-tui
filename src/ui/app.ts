@@ -20,7 +20,7 @@ import type { ReconcileUi } from "./reconcile.js";
 import { theme } from "./theme.js";
 import { ToolBlock, type ToolDisplayMode } from "./tool-block.js";
 
-interface ChatUiOptions {
+export interface ChatUiOptions {
   tui: TUI;
   agent: string;
   url: string;
@@ -28,15 +28,42 @@ interface ChatUiOptions {
   tools: ToolDisplayMode;
 }
 
-interface ReadLoopOptions {
-  onSubmit: (text: string, editor: Editor) => void;
+export interface ChatEditor {
+  addToHistory(text: string): void;
+  getText(): string;
+  setText(text: string): void;
+}
+
+export interface ReadLoopOptions {
+  onSubmit: (text: string, editor: ChatEditor) => void;
   onInput: (
     data: string,
-    editor: Editor,
+    editor: ChatEditor,
   ) => { consume?: boolean; data?: string } | undefined;
 }
 
-export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
+export interface ChatUi<TBlock> {
+  reconcileUi: ReconcileUi<TBlock>;
+  requestRender(): void;
+  addNotice(text: string): void;
+  setId(id: string): void;
+  clearTranscript(): void;
+  setBusy(busy: boolean): void;
+  recordUsage(usage: PromptUsage): void;
+  addRecoveredMarker(): void;
+  setToolsMode(mode: ToolDisplayMode): void;
+  toggleToolsExpanded(): void;
+  readLoop(options: ReadLoopOptions): () => void;
+  stop(): void;
+}
+
+export function createChatUi({
+  tui,
+  agent,
+  url,
+  id,
+  tools,
+}: ChatUiOptions): ChatUi<Component> {
   const chatContainer = new Container();
   const statusArea = new Container();
   const editor = new Editor(tui, theme.editor);
@@ -203,5 +230,6 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     setToolsMode,
     toggleToolsExpanded,
     readLoop,
+    stop: () => tui.stop(),
   };
 }
