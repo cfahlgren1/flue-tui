@@ -1,9 +1,99 @@
-import type { ConversationStreamChunk } from "@flue/sdk";
+import type {
+  ConversationStreamChunk,
+  FlueConversationSnapshot,
+} from "@flue/sdk";
 import { describe, expect, it } from "vitest";
 
-import { createTranslator } from "../src/events.js";
+import { createTranslator, hydrateFromSnapshot } from "../src/events.js";
 
 const position = { batch: 1, index: 1 };
+
+describe("hydrateFromSnapshot", () => {
+  it("returns no events for an empty snapshot", () => {
+    const snapshot = {
+      v: 1,
+      conversationId: "conversation-1",
+      offset: "0",
+      messages: [],
+      settlements: [],
+    } satisfies FlueConversationSnapshot;
+
+    expect(hydrateFromSnapshot(snapshot)).toEqual([]);
+  });
+
+  it("hydrates mixed user and assistant messages", () => {
+    const snapshot = {
+      v: 1,
+      conversationId: "conversation-1",
+      offset: "2",
+      messages: [
+        {
+          id: "message-1",
+          role: "user",
+          parts: [{ type: "text", text: "hello", state: "done" }],
+        },
+        {
+          id: "message-2",
+          role: "assistant",
+          parts: [
+            { type: "text", text: "hi ", state: "done" },
+            { type: "reasoning", text: "hidden", state: "done" },
+            { type: "text", text: "there", state: "done" },
+          ],
+        },
+      ],
+      settlements: [],
+    } satisfies FlueConversationSnapshot;
+
+    expect(hydrateFromSnapshot(snapshot)).toEqual([
+      { type: "user-message", text: "hello" },
+      { type: "assistant-complete", text: "hi there" },
+    ]);
+  });
+
+  it("hydrates a completed tool part as a start and end pair", () => {
+    const snapshot = {
+      v: 1,
+      conversationId: "conversation-1",
+      offset: "1",
+      messages: [
+        {
+          id: "message-1",
+          role: "assistant",
+          parts: [
+            {
+              type: "dynamic-tool",
+              toolName: "weather",
+              toolCallId: "tool-1",
+              state: "output-available",
+              input: { city: "London" },
+              output: { temperature: 20 },
+            },
+          ],
+        },
+      ],
+      settlements: [],
+    } satisfies FlueConversationSnapshot;
+
+    expect(hydrateFromSnapshot(snapshot)).toEqual([
+      { type: "assistant-complete", text: "" },
+      {
+        type: "tool-start",
+        toolCallId: "tool-1",
+        toolName: "weather",
+        input: { city: "London" },
+      },
+      {
+        type: "tool-end",
+        toolCallId: "tool-1",
+        toolName: "weather",
+        ok: true,
+        output: { temperature: 20 },
+        durationMs: 0,
+      },
+    ]);
+  });
+});
 
 describe("createTranslator", () => {
   it.each([

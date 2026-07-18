@@ -30,6 +30,21 @@ flue-tui https://flue.example.com/api send "hello" \
 Set `FLUE_TOKEN` to avoid putting a bearer token in process arguments.
 An explicit `--token` value overrides the environment variable.
 
+## Sessions
+
+Flue agent sessions are durable on the server. Start chat with an explicit
+instance id to hydrate its existing transcript and continue the conversation:
+
+```sh
+flue-tui --agent support --id ticket-42
+```
+
+Inside chat, `/id` prints the current agent and instance id, and `/new` clears
+the transcript and starts a freshly generated session. Pressing Esc or Ctrl+C
+during a busy turn only interrupts the local wait; the agent keeps running on
+the server. Use `/abort` to interrupt the local wait and durably abort all
+running and queued work for the current session on the server.
+
 ## Development
 
 ```sh

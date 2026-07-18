@@ -21,6 +21,7 @@ describe("resolveInvocation", () => {
       url: "https://flue.example.test/api",
       agent: "demo",
       id: "instance-1",
+      resume: true,
       token: "secret",
       headers: { "x-tenant": "acme" },
       tools: "collapsed",
@@ -31,6 +32,13 @@ describe("resolveInvocation", () => {
     expect(
       resolveInvocation(["--agent", "demo", "--tools", "full"]),
     ).toMatchObject({ kind: "chat", tools: "full" });
+  });
+
+  it("does not resume chat when the instance id was generated", () => {
+    expect(resolveInvocation(["--agent", "demo"])).toMatchObject({
+      kind: "chat",
+      resume: false,
+    });
   });
 
   it("requires an agent for chat", () => {

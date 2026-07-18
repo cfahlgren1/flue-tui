@@ -1,8 +1,9 @@
 import { matchesKey, ProcessTerminal, TUI } from "@earendil-works/pi-tui";
 import type { AgentSendResult } from "@flue/sdk";
 
+import { generateId } from "../args.js";
 import { createConnection, type ConnectionOptions } from "../client.js";
-import { createTranslator } from "../events.js";
+import { createTranslator, hydrateFromSnapshot } from "../events.js";
 import { createChatUi } from "../ui/app.js";
 import type { ToolDisplayMode } from "../ui/tool-block.js";
 
@@ -13,16 +14,27 @@ interface ActiveTurn {
 
 interface ChatCommandOptions extends ConnectionOptions {
   tools: ToolDisplayMode;
+  resume: boolean;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 404
+  );
+}
+
 export async function runChatCommand(
   options: ChatCommandOptions,
 ): Promise<number> {
-  const connection = createConnection(options);
+  let currentId = options.id;
+  let connection = createConnection(options);
   const tui = new TUI(new ProcessTerminal());
   const ui = createChatUi({ tui, ...options });
   let activeTurn: ActiveTurn | undefined;
@@ -44,19 +56,24 @@ export async function runChatCommand(
       interrupted: false,
     };
     activeTurn = turn;
+    const turnConnection = connection;
+    const turnId = currentId;
     ui.addUserMessage(message);
     ui.setBusy(true);
 
     let admission: AgentSendResult | undefined;
 
     try {
-      admission = await connection.send(message, {
+      admission = await turnConnection.send(message, {
         signal: turn.controller.signal,
       });
       const translator = createTranslator();
-      await connection.wait(admission, {
+      await turnConnection.wait(admission, {
         signal: turn.controller.signal,
         onEvent: (chunk) => {
+          if (activeTurn !== turn) {
+            return;
+          }
           for (const event of translator.translate(chunk)) {
             ui.applyEvent(event);
           }
@@ -66,7 +83,7 @@ export async function runChatCommand(
       if (!turn.interrupted) {
         if (admission !== undefined) {
           ui.addNotice(
-            `wait failed for agent "${options.agent}", instance id "${options.id}", ` +
+            `wait failed for agent "${options.agent}", instance id "${turnId}", ` +
               `submissionId "${admission.submissionId}"; the durable submission may ` +
               `still be running and can be observed by re-running against the same ` +
               `instance id: ${errorMessage(error)}`,
@@ -83,26 +100,103 @@ export async function runChatCommand(
     }
   };
 
+  const interruptActiveTurn = (showNotice = true) => {
+    if (activeTurn === undefined || activeTurn.interrupted) {
+      return;
+    }
+
+    activeTurn.interrupted = true;
+    activeTurn.controller.abort();
+    if (showNotice) {
+      ui.addNotice("interrupted — agent keeps running server-side");
+    }
+  };
+
+  const startNewSession = () => {
+    if (activeTurn !== undefined) {
+      interruptActiveTurn(false);
+      activeTurn = undefined;
+      ui.setBusy(false);
+    }
+
+    currentId = generateId();
+    connection = createConnection({ ...options, id: currentId });
+    ui.clearTranscript();
+    ui.setId(currentId);
+    ui.addNotice(`new session ${currentId}`);
+  };
+
+  const abortSession = async () => {
+    const abortedId = currentId;
+    const abortedConnection = connection;
+    interruptActiveTurn(false);
+
+    try {
+      const result = await abortedConnection.abort();
+      if (currentId !== abortedId) {
+        return;
+      }
+      ui.addNotice(
+        result.aborted
+          ? `remote abort requested for session ${abortedId}`
+          : `session ${abortedId} had no running or queued work to abort`,
+      );
+    } catch (error) {
+      if (currentId === abortedId) {
+        ui.addNotice(`abort failed: ${errorMessage(error)}`);
+      }
+    }
+  };
+
   const handleSubmit = (input: string) => {
     const message = input.trim();
-    if (message.length === 0 || activeTurn !== undefined) {
+    if (message.length === 0) {
       return;
     }
 
     if (message.startsWith("/")) {
       const command = message.split(/\s/, 1)[0];
       if (command === "/exit") {
+        interruptActiveTurn(false);
         finish(0);
       } else if (command === "/help") {
-        ui.addNotice("commands: /help, /exit");
+        ui.addNotice("commands: /help, /id, /new, /abort, /exit");
+      } else if (command === "/id") {
+        ui.addNotice(`agent ${options.agent}, session ${currentId}`);
+      } else if (command === "/new") {
+        startNewSession();
+      } else if (command === "/abort") {
+        void abortSession();
       } else {
         ui.addNotice(`unknown command: ${command}`);
       }
       return;
     }
 
+    if (activeTurn !== undefined) {
+      return;
+    }
+
     void sendMessage(message);
   };
+
+  if (options.resume) {
+    try {
+      const snapshot = await connection.history();
+      if (snapshot.messages.length > 0) {
+        for (const event of hydrateFromSnapshot(snapshot)) {
+          ui.applyEvent(event);
+        }
+        ui.addNotice(
+          `resumed session ${currentId} (${snapshot.messages.length} messages)`,
+        );
+      }
+    } catch (error) {
+      if (!isNotFound(error)) {
+        throw error;
+      }
+    }
+  }
 
   removeInputListener = ui.readLoop({
     onSubmit: (message, editor) => {
@@ -118,16 +212,25 @@ export async function runChatCommand(
         return { consume: true };
       }
 
+      if (matchesKey(data, "escape") && activeTurn !== undefined) {
+        interruptActiveTurn();
+        return { consume: true };
+      }
+
+      if (
+        matchesKey(data, "enter") &&
+        activeTurn !== undefined &&
+        !editor.getText().trim().startsWith("/")
+      ) {
+        return { consume: true };
+      }
+
       if (!matchesKey(data, "ctrl+c")) {
         return undefined;
       }
 
       if (activeTurn !== undefined) {
-        if (!activeTurn.interrupted) {
-          activeTurn.interrupted = true;
-          activeTurn.controller.abort();
-          ui.addNotice("interrupted — agent keeps running server-side");
-        }
+        interruptActiveTurn();
       } else if (editor.getText().length > 0) {
         editor.setText("");
         tui.requestRender();

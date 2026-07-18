@@ -1,6 +1,7 @@
 import type {
   ConversationStreamChunk,
   FlueConversationMessage,
+  FlueConversationSnapshot,
 } from "@flue/sdk";
 
 export type TuiEvent =
@@ -37,6 +38,55 @@ function getMessageText(message: FlueConversationMessage): string {
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
+}
+
+export function hydrateFromSnapshot(
+  snapshot: FlueConversationSnapshot,
+): TuiEvent[] {
+  const events: TuiEvent[] = [];
+
+  for (const message of snapshot.messages) {
+    events.push({
+      type:
+        message.role === "user" ? "user-message" : "assistant-complete",
+      text: getMessageText(message),
+    });
+
+    for (const part of message.parts) {
+      if (part.type !== "dynamic-tool" || part.state === "input-available") {
+        continue;
+      }
+
+      events.push({
+        type: "tool-start",
+        toolCallId: part.toolCallId,
+        toolName: part.toolName,
+        input: part.input,
+      });
+
+      if (part.state === "output-available") {
+        events.push({
+          type: "tool-end",
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          ok: true,
+          output: part.output,
+          durationMs: 0,
+        });
+      } else {
+        events.push({
+          type: "tool-end",
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          ok: false,
+          errorMessage: part.errorText,
+          durationMs: 0,
+        });
+      }
+    }
+  }
+
+  return events;
 }
 
 export function createTranslator(now: () => number = Date.now) {

@@ -35,15 +35,18 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   const chatContainer = new Container();
   const statusArea = new Container();
   const editor = new Editor(tui, theme.editor);
+  const header = new Text(
+    theme.header(`flue-tui · ${agent}@${url} · ${id}`),
+    1,
+    1,
+  );
   const toolBlocks = new Map<string, ToolBlock>();
   let currentAssistant: AssistantMessageBlock | undefined;
   let receivedAssistantDelta = false;
   let toolsExpanded = tools === "full";
   let loader: Loader | undefined;
 
-  tui.addChild(
-    new Text(theme.header(`flue-tui · ${agent}@${url} · ${id}`), 1, 1),
-  );
+  tui.addChild(header);
   tui.addChild(chatContainer);
   tui.addChild(statusArea);
   tui.addChild(editor);
@@ -70,9 +73,20 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     requestRender();
   };
 
-  const setBusy = (busy: boolean) => {
-    editor.disableSubmit = busy;
+  const setId = (nextId: string) => {
+    header.setText(theme.header(`flue-tui · ${agent}@${url} · ${nextId}`));
+    requestRender();
+  };
 
+  const clearTranscript = () => {
+    chatContainer.clear();
+    toolBlocks.clear();
+    currentAssistant = undefined;
+    receivedAssistantDelta = false;
+    requestRender();
+  };
+
+  const setBusy = (busy: boolean) => {
     if (busy && loader === undefined) {
       loader = new Loader(
         tui,
@@ -144,11 +158,8 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
       case "reasoning-complete":
         break;
       case "reset":
-        chatContainer.clear();
-        toolBlocks.clear();
-        currentAssistant = undefined;
-        receivedAssistantDelta = false;
-        break;
+        clearTranscript();
+        return;
       case "settled":
         currentAssistant = undefined;
         receivedAssistantDelta = false;
@@ -188,6 +199,8 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     applyEvent,
     addUserMessage,
     addNotice,
+    setId,
+    clearTranscript,
     setBusy,
     toggleToolsExpanded,
     readLoop,

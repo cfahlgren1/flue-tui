@@ -12,6 +12,7 @@ export interface ParsedCliArgs {
   message?: string;
   agent?: string;
   id: string;
+  idProvided: boolean;
   token?: string;
   headers: Record<string, string>;
   json: boolean;
@@ -27,6 +28,7 @@ export type CliInvocation =
       url: string;
       agent: string;
       id: string;
+      resume: boolean;
       token?: string;
       headers: Record<string, string>;
       tools: ToolDisplayMode;
@@ -150,6 +152,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     message,
     agent: values.agent,
     id: values.id ?? generateId(),
+    idProvided: values.id !== undefined,
     token: values.token ?? process.env.FLUE_TOKEN,
     headers: parseHeaders(values.header),
     json: values.json,
@@ -188,6 +191,7 @@ export function resolveInvocation(args: string[]): CliInvocation {
     url: parsed.url,
     agent: parsed.agent,
     id: parsed.id,
+    resume: parsed.idProvided,
     token: parsed.token,
     headers: parsed.headers,
     tools: parsed.tools,
