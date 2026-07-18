@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 
+import type { ToolDisplayMode } from "./ui/tool-block.js";
+
 const DEFAULT_URL = "http://127.0.0.1:3583";
 const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -13,6 +15,7 @@ export interface ParsedCliArgs {
   token?: string;
   headers: Record<string, string>;
   json: boolean;
+  tools: ToolDisplayMode;
   help: boolean;
   version: boolean;
 }
@@ -26,6 +29,7 @@ export type CliInvocation =
       id: string;
       token?: string;
       headers: Record<string, string>;
+      tools: ToolDisplayMode;
     }
   | {
       kind: "send";
@@ -94,15 +98,14 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", default: false },
+      tools: { type: "string", default: "collapsed" },
     },
     strict: true,
   });
 
   const remaining = [...positionals];
   const url = validateUrl(
-    remaining[0] === "send"
-      ? DEFAULT_URL
-      : (remaining.shift() ?? DEFAULT_URL),
+    remaining[0] === "send" ? DEFAULT_URL : (remaining.shift() ?? DEFAULT_URL),
   );
   const command = remaining.shift();
 
@@ -131,6 +134,16 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     throw new Error("--id cannot be empty");
   }
 
+  if (
+    !(["collapsed", "full", "hidden"] as const).includes(
+      values.tools as ToolDisplayMode,
+    )
+  ) {
+    throw new Error(
+      `invalid --tools value "${values.tools}": expected collapsed, full, or hidden`,
+    );
+  }
+
   return {
     url,
     command,
@@ -140,6 +153,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     token: values.token ?? process.env.FLUE_TOKEN,
     headers: parseHeaders(values.header),
     json: values.json,
+    tools: values.tools as ToolDisplayMode,
     help: values.help,
     version: values.version,
   };
@@ -176,5 +190,6 @@ export function resolveInvocation(args: string[]): CliInvocation {
     id: parsed.id,
     token: parsed.token,
     headers: parsed.headers,
+    tools: parsed.tools,
   };
 }

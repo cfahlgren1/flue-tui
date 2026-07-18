@@ -1,10 +1,8 @@
-import type {
-  AgentPromptResponse,
-  ConversationStreamChunk,
-} from "@flue/sdk";
+import type { AgentPromptResponse, ConversationStreamChunk } from "@flue/sdk";
 import chalk from "chalk";
 
 import type { FlueConnection } from "../client.js";
+import { summarize } from "../ui/format.js";
 
 interface SendCommandOptions {
   connection: FlueConnection;
@@ -59,7 +57,9 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
       }
       case "tool-input": {
         startLine();
-        write(chalk.dim(`tool ${event.toolName}\n`));
+        write(
+          chalk.dim(`tool ${event.toolName} ${summarize(event.input, 80)}\n`),
+        );
         activeTools.set(event.toolCallId, {
           name: event.toolName,
           startedAt: Date.now(),
@@ -73,9 +73,15 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
         const name = tool?.name ?? event.toolCallId;
         const durationMs = tool ? Date.now() - tool.startedAt : 0;
         const status = event.type === "tool-output" ? "done" : "error";
+        const result =
+          event.type === "tool-output" ? event.output : event.errorText;
 
         startLine();
-        write(chalk.dim(`tool ${status} ${name} (${durationMs}ms)\n`));
+        write(
+          chalk.dim(
+            `tool ${status} ${name} (${durationMs}ms) → ${summarize(result, 80)}\n`,
+          ),
+        );
         activeTools.delete(event.toolCallId);
         lastDeltaKind = undefined;
         break;

@@ -4,10 +4,15 @@ import type { AgentSendResult } from "@flue/sdk";
 import { createConnection, type ConnectionOptions } from "../client.js";
 import { createTranslator } from "../events.js";
 import { createChatUi } from "../ui/app.js";
+import type { ToolDisplayMode } from "../ui/tool-block.js";
 
 interface ActiveTurn {
   controller: AbortController;
   interrupted: boolean;
+}
+
+interface ChatCommandOptions extends ConnectionOptions {
+  tools: ToolDisplayMode;
 }
 
 function errorMessage(error: unknown): string {
@@ -15,7 +20,7 @@ function errorMessage(error: unknown): string {
 }
 
 export async function runChatCommand(
-  options: ConnectionOptions,
+  options: ChatCommandOptions,
 ): Promise<number> {
   const connection = createConnection(options);
   const tui = new TUI(new ProcessTerminal());
@@ -108,6 +113,11 @@ export async function runChatCommand(
       handleSubmit(message);
     },
     onInput: (data, editor) => {
+      if (matchesKey(data, "ctrl+t")) {
+        ui.toggleToolsExpanded();
+        return { consume: true };
+      }
+
       if (!matchesKey(data, "ctrl+c")) {
         return undefined;
       }

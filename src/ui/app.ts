@@ -13,12 +13,14 @@ import {
   UserMessageBlock,
 } from "./blocks.js";
 import { theme } from "./theme.js";
+import { ToolBlock, type ToolDisplayMode } from "./tool-block.js";
 
 interface ChatUiOptions {
   tui: TUI;
   agent: string;
   url: string;
   id: string;
+  tools: ToolDisplayMode;
 }
 
 interface ReadLoopOptions {
@@ -29,14 +31,19 @@ interface ReadLoopOptions {
   ) => { consume?: boolean; data?: string } | undefined;
 }
 
-export function createChatUi({ tui, agent, url, id }: ChatUiOptions) {
+export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   const chatContainer = new Container();
   const statusArea = new Container();
   const editor = new Editor(tui, theme.editor);
+  const toolBlocks = new Map<string, ToolBlock>();
   let currentAssistant: AssistantMessageBlock | undefined;
+  let receivedAssistantDelta = false;
+  let toolsExpanded = tools === "full";
   let loader: Loader | undefined;
 
-  tui.addChild(new Text(theme.header(`flue-tui · ${agent}@${url} · ${id}`), 1, 1));
+  tui.addChild(
+    new Text(theme.header(`flue-tui · ${agent}@${url} · ${id}`), 1, 1),
+  );
   tui.addChild(chatContainer);
   tui.addChild(statusArea);
   tui.addChild(editor);
@@ -53,6 +60,7 @@ export function createChatUi({ tui, agent, url, id }: ChatUiOptions) {
 
   const addUserMessage = (text: string) => {
     currentAssistant = undefined;
+    receivedAssistantDelta = false;
     chatContainer.addChild(new UserMessageBlock(text));
     requestRender();
   };
@@ -88,33 +96,62 @@ export function createChatUi({ tui, agent, url, id }: ChatUiOptions) {
         addUserMessage(event.text);
         return;
       case "assistant-delta":
+        receivedAssistantDelta = true;
         (currentAssistant ?? addAssistant()).appendDelta(event.text);
         break;
       case "reasoning-delta":
         (currentAssistant ?? addAssistant()).appendReasoning(event.text);
         break;
-      case "tool-start":
-        (currentAssistant ?? addAssistant()).addToolLine(`tool ${event.toolName}`);
+      case "tool-start": {
+        if (tools === "hidden") {
+          break;
+        }
+
+        currentAssistant = undefined;
+        const block = new ToolBlock(event, toolsExpanded);
+        toolBlocks.set(event.toolCallId, block);
+        chatContainer.addChild(block);
         break;
+      }
       case "tool-end": {
-        const status = event.ok ? "done" : "error";
-        (currentAssistant ?? addAssistant()).addToolLine(
-          `tool ${status} ${event.toolName} (${event.durationMs}ms)`,
-        );
+        if (tools === "hidden") {
+          break;
+        }
+
+        let block = toolBlocks.get(event.toolCallId);
+        if (block === undefined) {
+          currentAssistant = undefined;
+          block = new ToolBlock(
+            {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+            },
+            toolsExpanded,
+          );
+          toolBlocks.set(event.toolCallId, block);
+          chatContainer.addChild(block);
+        }
+        block.complete(event);
         break;
       }
       case "assistant-complete":
-        (currentAssistant ?? addAssistant()).complete(event.text);
+        if (!receivedAssistantDelta && event.text.length > 0) {
+          (currentAssistant ?? addAssistant()).complete(event.text);
+        }
         currentAssistant = undefined;
+        receivedAssistantDelta = false;
         break;
       case "reasoning-complete":
         break;
       case "reset":
         chatContainer.clear();
+        toolBlocks.clear();
         currentAssistant = undefined;
+        receivedAssistantDelta = false;
         break;
       case "settled":
         currentAssistant = undefined;
+        receivedAssistantDelta = false;
         setBusy(false);
         return;
       default: {
@@ -123,6 +160,18 @@ export function createChatUi({ tui, agent, url, id }: ChatUiOptions) {
       }
     }
 
+    requestRender();
+  };
+
+  const toggleToolsExpanded = () => {
+    if (tools === "hidden") {
+      return;
+    }
+
+    toolsExpanded = !toolsExpanded;
+    for (const block of toolBlocks.values()) {
+      block.setExpanded(toolsExpanded);
+    }
     requestRender();
   };
 
@@ -135,5 +184,12 @@ export function createChatUi({ tui, agent, url, id }: ChatUiOptions) {
     return removeInputListener;
   };
 
-  return { applyEvent, addUserMessage, addNotice, setBusy, readLoop };
+  return {
+    applyEvent,
+    addUserMessage,
+    addNotice,
+    setBusy,
+    toggleToolsExpanded,
+    readLoop,
+  };
 }

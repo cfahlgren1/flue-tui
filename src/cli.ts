@@ -29,6 +29,7 @@ Options:
   --id <id>         persistent agent instance id
   --token <bearer>  bearer token
   --header k=v      additional request header (repeatable)
+  --tools <mode>    tool blocks: collapsed, full, or hidden (default: collapsed)
   --json            print the final result as JSON
   --help, -h
   --version`);

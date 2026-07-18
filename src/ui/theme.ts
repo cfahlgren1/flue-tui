@@ -46,4 +46,7 @@ export const theme = {
   muted: chalk.dim,
   notice: chalk.dim.italic,
   reasoning: chalk.dim.italic,
+  toolRunning: chalk.cyan,
+  toolSuccess: chalk.green,
+  toolError: chalk.red,
 };

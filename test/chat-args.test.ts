@@ -23,13 +23,18 @@ describe("resolveInvocation", () => {
       id: "instance-1",
       token: "secret",
       headers: { "x-tenant": "acme" },
+      tools: "collapsed",
     });
   });
 
+  it("passes the initial tool display mode to chat", () => {
+    expect(
+      resolveInvocation(["--agent", "demo", "--tools", "full"]),
+    ).toMatchObject({ kind: "chat", tools: "full" });
+  });
+
   it("requires an agent for chat", () => {
-    expect(() => resolveInvocation([])).toThrow(
-      "chat requires --agent <name>",
-    );
+    expect(() => resolveInvocation([])).toThrow("chat requires --agent <name>");
   });
 
   it("keeps send routed separately", () => {

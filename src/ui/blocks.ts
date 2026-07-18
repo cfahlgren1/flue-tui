@@ -12,7 +12,6 @@ export class UserMessageBlock extends Container {
 export class AssistantMessageBlock extends Container {
   private text = "";
   private reasoning = "";
-  private readonly toolLines: string[] = [];
 
   constructor() {
     super();
@@ -26,11 +25,6 @@ export class AssistantMessageBlock extends Container {
 
   appendReasoning(text: string): void {
     this.reasoning += text;
-    this.rebuild();
-  }
-
-  addToolLine(text: string): void {
-    this.toolLines.push(text);
     this.rebuild();
   }
 
@@ -50,10 +44,6 @@ export class AssistantMessageBlock extends Container {
           italic: true,
         }),
       );
-    }
-
-    for (const line of this.toolLines) {
-      this.addChild(new Text(theme.muted(line), 1, 0));
     }
 
     if (this.text.length > 0) {

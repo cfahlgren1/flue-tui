@@ -20,6 +20,22 @@ describe("parseCliArgs", () => {
     expect(args.url).toBe("http://127.0.0.1:3583");
   });
 
+  it("defaults tool blocks to collapsed and accepts full or hidden", () => {
+    expect(parseCliArgs(["--agent", "demo"]).tools).toBe("collapsed");
+    expect(parseCliArgs(["--agent", "demo", "--tools", "full"]).tools).toBe(
+      "full",
+    );
+    expect(parseCliArgs(["--agent", "demo", "--tools", "hidden"]).tools).toBe(
+      "hidden",
+    );
+  });
+
+  it("rejects invalid tool display modes", () => {
+    expect(() =>
+      parseCliArgs(["--agent", "demo", "--tools", "verbose"]),
+    ).toThrow("expected collapsed, full, or hidden");
+  });
+
   it("parses repeated headers and preserves equals signs in values", () => {
     const args = parseCliArgs([
       "https://flue.example.test/api",
@@ -68,20 +84,19 @@ describe("parseCliArgs", () => {
     expect(args.token).toBe("cli-secret");
   });
 
-  it.each([
-    "not-a-url",
-    "ftp://flue.example.test",
-    "file:///tmp/flue.sock",
-  ])("rejects the invalid URL %s", (url) => {
-    expect(() =>
-      parseCliArgs([url, "send", "hello", "--agent", "demo"]),
-    ).toThrow(/http\(s\) URL/);
-  });
+  it.each(["not-a-url", "ftp://flue.example.test", "file:///tmp/flue.sock"])(
+    "rejects the invalid URL %s",
+    (url) => {
+      expect(() =>
+        parseCliArgs([url, "send", "hello", "--agent", "demo"]),
+      ).toThrow(/http\(s\) URL/);
+    },
+  );
 
   it("rejects empty agent and instance ids", () => {
-    expect(() =>
-      parseCliArgs(["send", "hello", "--agent", ""]),
-    ).toThrow("--agent cannot be empty");
+    expect(() => parseCliArgs(["send", "hello", "--agent", ""])).toThrow(
+      "--agent cannot be empty",
+    );
     expect(() =>
       parseCliArgs(["send", "hello", "--agent", "demo", "--id", ""]),
     ).toThrow("--id cannot be empty");
