@@ -38,6 +38,7 @@ export type CliInvocation =
       url: string;
       agent: string;
       id: string;
+      idProvided: boolean;
       token?: string;
       headers: Record<string, string>;
       message: string;
@@ -110,6 +111,9 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     remaining[0] === "send" ? DEFAULT_URL : (remaining.shift() ?? DEFAULT_URL),
   );
   const command = remaining.shift();
+  const toolsProvided = args.some(
+    (arg) => arg === "--tools" || arg.startsWith("--tools="),
+  );
 
   if (command !== undefined && command !== "send") {
     throw new Error(`unknown command "${command}"`);
@@ -126,6 +130,14 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
 
   if (command === "send" && values.agent === undefined && !values.help) {
     throw new Error("send requires --agent <name>");
+  }
+
+  if (command === "send" && toolsProvided) {
+    throw new Error("--tools is only available for chat");
+  }
+
+  if (command === undefined && values.json) {
+    throw new Error("--json is only available for send");
   }
 
   if (values.agent !== undefined && values.agent.trim().length === 0) {
@@ -175,6 +187,7 @@ export function resolveInvocation(args: string[]): CliInvocation {
       url: parsed.url,
       agent: parsed.agent!,
       id: parsed.id,
+      idProvided: parsed.idProvided,
       token: parsed.token,
       headers: parsed.headers,
       message: parsed.message!,

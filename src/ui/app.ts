@@ -3,15 +3,17 @@ import {
   Editor,
   Loader,
   Text,
+  type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import type { TuiEvent } from "../events.js";
 import {
   AssistantMessageBlock,
   NoticeBlock,
+  ReasoningBlock,
   UserMessageBlock,
 } from "./blocks.js";
+import type { ReconcileUi } from "./reconcile.js";
 import { theme } from "./theme.js";
 import { ToolBlock, type ToolDisplayMode } from "./tool-block.js";
 
@@ -41,8 +43,6 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     1,
   );
   const toolBlocks = new Map<string, ToolBlock>();
-  let currentAssistant: AssistantMessageBlock | undefined;
-  let receivedAssistantDelta = false;
   let toolsExpanded = tools === "full";
   let loader: Loader | undefined;
 
@@ -53,20 +53,6 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   tui.setFocus(editor);
 
   const requestRender = () => tui.requestRender();
-
-  const addAssistant = () => {
-    const block = new AssistantMessageBlock();
-    chatContainer.addChild(block);
-    currentAssistant = block;
-    return block;
-  };
-
-  const addUserMessage = (text: string) => {
-    currentAssistant = undefined;
-    receivedAssistantDelta = false;
-    chatContainer.addChild(new UserMessageBlock(text));
-    requestRender();
-  };
 
   const addNotice = (text: string) => {
     chatContainer.addChild(new NoticeBlock(text));
@@ -81,8 +67,6 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   const clearTranscript = () => {
     chatContainer.clear();
     toolBlocks.clear();
-    currentAssistant = undefined;
-    receivedAssistantDelta = false;
     requestRender();
   };
 
@@ -104,74 +88,58 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     requestRender();
   };
 
-  const applyEvent = (event: TuiEvent) => {
-    switch (event.type) {
-      case "user-message":
-        addUserMessage(event.text);
-        return;
-      case "assistant-delta":
-        receivedAssistantDelta = true;
-        (currentAssistant ?? addAssistant()).appendDelta(event.text);
-        break;
-      case "reasoning-delta":
-        (currentAssistant ?? addAssistant()).appendReasoning(event.text);
-        break;
-      case "tool-start": {
-        if (tools === "hidden") {
-          break;
-        }
-
-        currentAssistant = undefined;
-        const block = new ToolBlock(event, toolsExpanded);
-        toolBlocks.set(event.toolCallId, block);
-        chatContainer.addChild(block);
-        break;
-      }
-      case "tool-end": {
-        if (tools === "hidden") {
-          break;
-        }
-
-        let block = toolBlocks.get(event.toolCallId);
-        if (block === undefined) {
-          currentAssistant = undefined;
-          block = new ToolBlock(
-            {
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-            },
-            toolsExpanded,
-          );
-          toolBlocks.set(event.toolCallId, block);
-          chatContainer.addChild(block);
-        }
-        block.complete(event);
-        break;
-      }
-      case "assistant-complete":
-        if (!receivedAssistantDelta && event.text.length > 0) {
-          (currentAssistant ?? addAssistant()).complete(event.text);
-        }
-        currentAssistant = undefined;
-        receivedAssistantDelta = false;
-        break;
-      case "reasoning-complete":
-        break;
-      case "reset":
-        clearTranscript();
-        return;
-      case "settled":
-        currentAssistant = undefined;
-        receivedAssistantDelta = false;
-        setBusy(false);
-        return;
-      default: {
-        const exhaustive: never = event;
-        return exhaustive;
-      }
+  const registerToolBlock = (block: Component) => {
+    if (block instanceof ToolBlock) {
+      toolBlocks.set(block.toolCallId, block);
     }
+  };
 
-    requestRender();
+  const reconcileUi: ReconcileUi<Component> = {
+    createTextBlock(role, part) {
+      const block =
+        role === "user"
+          ? new UserMessageBlock(part.text)
+          : new AssistantMessageBlock(part.text);
+      return {
+        block,
+        update(nextPart) {
+          block.setText(nextPart.text);
+        },
+      };
+    },
+    createReasoningBlock(part) {
+      const block = new ReasoningBlock(part.text);
+      return {
+        block,
+        update(nextPart) {
+          block.setText(nextPart.text);
+        },
+      };
+    },
+    createToolBlock(part) {
+      if (tools === "hidden") {
+        return { update: () => undefined };
+      }
+      const block = new ToolBlock(part, toolsExpanded);
+      return {
+        block,
+        update(nextPart) {
+          block.update(nextPart);
+        },
+      };
+    },
+    appendTranscriptBlock(block) {
+      registerToolBlock(block);
+      chatContainer.addChild(block);
+    },
+    replaceTranscript(blocks) {
+      chatContainer.clear();
+      toolBlocks.clear();
+      for (const block of blocks) {
+        registerToolBlock(block);
+        chatContainer.addChild(block);
+      }
+    },
   };
 
   const toggleToolsExpanded = () => {
@@ -196,8 +164,8 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   };
 
   return {
-    applyEvent,
-    addUserMessage,
+    reconcileUi,
+    requestRender,
     addNotice,
     setId,
     clearTranscript,

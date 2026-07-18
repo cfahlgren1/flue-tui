@@ -114,6 +114,11 @@ describe("main", () => {
     ["unknown option", ["--unknown"]],
     ["missing send message", ["send", "--agent", "demo"]],
     ["invalid URL", ["not-a-url", "send", "hello", "--agent", "demo"]],
+    ["chat --json", ["--agent", "demo", "--json"]],
+    [
+      "send --tools",
+      ["send", "hello", "--agent", "demo", "--tools", "full"],
+    ],
   ])("returns exit code 2 for %s", async (_name, args) => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 

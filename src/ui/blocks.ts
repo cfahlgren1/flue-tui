@@ -3,32 +3,41 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { theme } from "./theme.js";
 
 export class UserMessageBlock extends Container {
+  private text: string;
+
   constructor(text: string) {
     super();
-    this.addChild(new Text(`${theme.muted("> ")}${text}`, 1, 1));
+    this.text = text;
+    this.rebuild();
+  }
+
+  setText(text: string): void {
+    if (this.text === text) {
+      return;
+    }
+    this.text = text;
+    this.rebuild();
+  }
+
+  private rebuild(): void {
+    this.clear();
+    this.addChild(new Text(`${theme.muted("> ")}${this.text}`, 1, 1));
   }
 }
 
 export class AssistantMessageBlock extends Container {
-  private text = "";
-  private reasoning = "";
+  private text: string;
 
-  constructor() {
+  constructor(text: string) {
     super();
+    this.text = text;
     this.rebuild();
   }
 
-  appendDelta(text: string): void {
-    this.text += text;
-    this.rebuild();
-  }
-
-  appendReasoning(text: string): void {
-    this.reasoning += text;
-    this.rebuild();
-  }
-
-  complete(text: string): void {
+  setText(text: string): void {
+    if (this.text === text) {
+      return;
+    }
     this.text = text;
     this.rebuild();
   }
@@ -37,17 +46,39 @@ export class AssistantMessageBlock extends Container {
     this.clear();
     this.addChild(new Spacer(1));
 
-    if (this.reasoning.length > 0) {
+    if (this.text.length > 0) {
+      this.addChild(new Markdown(this.text, 1, 0, theme.markdown));
+    }
+  }
+}
+
+export class ReasoningBlock extends Container {
+  private text: string;
+
+  constructor(text: string) {
+    super();
+    this.text = text;
+    this.rebuild();
+  }
+
+  setText(text: string): void {
+    if (this.text === text) {
+      return;
+    }
+    this.text = text;
+    this.rebuild();
+  }
+
+  private rebuild(): void {
+    this.clear();
+    this.addChild(new Spacer(1));
+    if (this.text.length > 0) {
       this.addChild(
-        new Markdown(this.reasoning, 1, 0, theme.markdown, {
+        new Markdown(this.text, 1, 0, theme.markdown, {
           color: theme.reasoning,
           italic: true,
         }),
       );
-    }
-
-    if (this.text.length > 0) {
-      this.addChild(new Markdown(this.text, 1, 0, theme.markdown));
     }
   }
 }

@@ -21,16 +21,22 @@ export {
 
 function printUsage() {
   console.log(`Usage:
-  flue-tui [url] --agent <name> [options]
-  flue-tui [url] send <message> --agent <name> [options]
+  flue-tui [url] --agent <name> [chat options]
+  flue-tui [url] send <message> --agent <name> [send options]
 
-Options:
+Shared options:
   --agent <name>    agent name (required for chat and send)
   --id <id>         persistent agent instance id
   --token <bearer>  bearer token
   --header k=v      additional request header (repeatable)
+
+Chat options:
   --tools <mode>    tool blocks: collapsed, full, or hidden (default: collapsed)
+
+Send options:
   --json            print the final result as JSON
+
+Other options:
   --help, -h
   --version`);
 }
@@ -74,6 +80,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       }),
       agent: invocation.agent,
       id: invocation.id,
+      idProvided: invocation.idProvided,
       message: invocation.message,
       json: invocation.json,
     });

@@ -1,15 +1,29 @@
-import { matchesKey, ProcessTerminal, TUI } from "@earendil-works/pi-tui";
-import type { AgentSendResult } from "@flue/sdk";
+import {
+  isKeyRelease,
+  matchesKey,
+  ProcessTerminal,
+  TUI,
+} from "@earendil-works/pi-tui";
+import type {
+  AgentConversationObservation,
+  AgentSendResult,
+  ConversationStreamChunk,
+} from "@flue/sdk";
 
 import { generateId } from "../args.js";
 import { createConnection, type ConnectionOptions } from "../client.js";
-import { createTranslator, hydrateFromSnapshot } from "../events.js";
 import { createChatUi } from "../ui/app.js";
+import { createReconciler } from "../ui/reconcile.js";
 import type { ToolDisplayMode } from "../ui/tool-block.js";
+import {
+  errorMessage,
+  formatPostAdmissionWaitError,
+} from "../wait-error.js";
 
-interface ActiveTurn {
+interface LocalWait {
   controller: AbortController;
   interrupted: boolean;
+  submissionId?: string;
 }
 
 interface ChatCommandOptions extends ConnectionOptions {
@@ -17,17 +31,8 @@ interface ChatCommandOptions extends ConnectionOptions {
   resume: boolean;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    error.status === 404
-  );
+export function shouldIgnoreChatInput(data: string): boolean {
+  return isKeyRelease(data);
 }
 
 export async function runChatCommand(
@@ -37,99 +42,168 @@ export async function runChatCommand(
   let connection = createConnection(options);
   const tui = new TUI(new ProcessTerminal());
   const ui = createChatUi({ tui, ...options });
-  let activeTurn: ActiveTurn | undefined;
+  let localWait: LocalWait | undefined;
+  let observation: AgentConversationObservation | undefined;
+  let removeObservationListener: () => void = () => undefined;
   let removeInputListener: () => void = () => undefined;
-  let finish: (code: number) => void;
+  let finish!: (code: number) => void;
+  let reconciler = createReconciler(ui.reconcileUi);
+
+  const closeObservation = () => {
+    removeObservationListener();
+    removeObservationListener = () => undefined;
+    observation?.close();
+    observation = undefined;
+  };
 
   const done = new Promise<number>((resolve) => {
     finish = (code) => {
       removeInputListener();
+      closeObservation();
       ui.setBusy(false);
       tui.stop();
       resolve(code);
     };
   });
 
+  const openObservation = (showResumeNotice: boolean) => {
+    const nextObservation = connection.observe({ live: "sse" });
+    let resumeNoticePending = showResumeNotice;
+    let reportedError: Error | undefined;
+    observation = nextObservation;
+    removeObservationListener = nextObservation.subscribe(() => {
+      if (observation !== nextObservation) {
+        return;
+      }
+
+      const snapshot = nextObservation.getSnapshot();
+      if (snapshot.conversation !== undefined) {
+        reconciler.reconcile(snapshot.conversation);
+        ui.requestRender();
+        if (resumeNoticePending) {
+          resumeNoticePending = false;
+          ui.addNotice(
+            `resumed session ${currentId} (${snapshot.conversation.messages.length} messages)`,
+          );
+        }
+      } else if (snapshot.phase === "absent") {
+        resumeNoticePending = false;
+      }
+
+      if (
+        snapshot.phase === "error" &&
+        snapshot.error !== undefined &&
+        snapshot.error !== reportedError
+      ) {
+        reportedError = snapshot.error;
+        ui.addNotice(`observation failed: ${errorMessage(snapshot.error)}`);
+      }
+    });
+  };
+
   const sendMessage = async (message: string) => {
-    const turn: ActiveTurn = {
+    const wait: LocalWait = {
       controller: new AbortController(),
       interrupted: false,
     };
-    activeTurn = turn;
-    const turnConnection = connection;
-    const turnId = currentId;
-    ui.addUserMessage(message);
+    localWait = wait;
+    const waitConnection = connection;
+    const waitId = currentId;
     ui.setBusy(true);
 
     let admission: AgentSendResult | undefined;
+    let settlement:
+      | Extract<ConversationStreamChunk, { type: "submission-settled" }>
+      | undefined;
 
     try {
-      admission = await turnConnection.send(message, {
-        signal: turn.controller.signal,
+      admission = await waitConnection.send(message, {
+        signal: wait.controller.signal,
       });
-      const translator = createTranslator();
-      await turnConnection.wait(admission, {
-        signal: turn.controller.signal,
-        onEvent: (chunk) => {
-          if (activeTurn !== turn) {
-            return;
-          }
-          for (const event of translator.translate(chunk)) {
-            ui.applyEvent(event);
+      wait.submissionId = admission.submissionId;
+      if (observation !== undefined) {
+        const phase = observation.getSnapshot().phase;
+        if (phase === "absent" || phase === "loading") {
+          observation.refresh();
+        }
+      }
+      await waitConnection.wait(admission, {
+        signal: wait.controller.signal,
+        onEvent: (event) => {
+          if (
+            event.type === "submission-settled" &&
+            event.submissionId === wait.submissionId
+          ) {
+            settlement = event;
           }
         },
       });
     } catch (error) {
-      if (!turn.interrupted) {
+      if (!wait.interrupted) {
         if (admission !== undefined) {
+          const observedSettlement = observation
+            ?.getSnapshot()
+            .conversation?.settlements.find(
+              (value) => value.submissionId === admission?.submissionId,
+            );
           ui.addNotice(
-            `wait failed for agent "${options.agent}", instance id "${turnId}", ` +
-              `submissionId "${admission.submissionId}"; the durable submission may ` +
-              `still be running and can be observed by re-running against the same ` +
-              `instance id: ${errorMessage(error)}`,
+            formatPostAdmissionWaitError({
+              agent: options.agent,
+              id: waitId,
+              submissionId: admission.submissionId,
+              settlement: settlement ?? observedSettlement,
+              error,
+            }),
           );
         } else {
           ui.addNotice(`error: ${errorMessage(error)}`);
         }
       }
     } finally {
-      if (activeTurn === turn) {
-        activeTurn = undefined;
+      if (localWait === wait) {
+        localWait = undefined;
         ui.setBusy(false);
       }
     }
   };
 
-  const interruptActiveTurn = (showNotice = true) => {
-    if (activeTurn === undefined || activeTurn.interrupted) {
+  const cancelLocalWait = (showNotice = true) => {
+    if (localWait === undefined || localWait.interrupted) {
       return;
     }
 
-    activeTurn.interrupted = true;
-    activeTurn.controller.abort();
+    localWait.interrupted = true;
+    localWait.controller.abort();
     if (showNotice) {
       ui.addNotice("interrupted — agent keeps running server-side");
     }
   };
 
   const startNewSession = () => {
-    if (activeTurn !== undefined) {
-      interruptActiveTurn(false);
-      activeTurn = undefined;
+    const previousId = currentId;
+    if (localWait !== undefined) {
+      cancelLocalWait(false);
+      localWait = undefined;
       ui.setBusy(false);
     }
 
+    closeObservation();
     currentId = generateId();
     connection = createConnection({ ...options, id: currentId });
+    reconciler = createReconciler(ui.reconcileUi);
     ui.clearTranscript();
     ui.setId(currentId);
-    ui.addNotice(`new session ${currentId}`);
+    openObservation(false);
+    ui.addNotice(
+      `new session ${currentId} — previous session ${previousId} keeps running server-side; ` +
+        `resume it with --id ${previousId}`,
+    );
   };
 
   const abortSession = async () => {
     const abortedId = currentId;
     const abortedConnection = connection;
-    interruptActiveTurn(false);
+    cancelLocalWait(false);
 
     try {
       const result = await abortedConnection.abort();
@@ -157,7 +231,7 @@ export async function runChatCommand(
     if (message.startsWith("/")) {
       const command = message.split(/\s/, 1)[0];
       if (command === "/exit") {
-        interruptActiveTurn(false);
+        cancelLocalWait(false);
         finish(0);
       } else if (command === "/help") {
         ui.addNotice("commands: /help, /id, /new, /abort, /exit");
@@ -173,30 +247,14 @@ export async function runChatCommand(
       return;
     }
 
-    if (activeTurn !== undefined) {
+    if (localWait !== undefined) {
       return;
     }
 
     void sendMessage(message);
   };
 
-  if (options.resume) {
-    try {
-      const snapshot = await connection.history();
-      if (snapshot.messages.length > 0) {
-        for (const event of hydrateFromSnapshot(snapshot)) {
-          ui.applyEvent(event);
-        }
-        ui.addNotice(
-          `resumed session ${currentId} (${snapshot.messages.length} messages)`,
-        );
-      }
-    } catch (error) {
-      if (!isNotFound(error)) {
-        throw error;
-      }
-    }
-  }
+  openObservation(options.resume);
 
   removeInputListener = ui.readLoop({
     onSubmit: (message, editor) => {
@@ -207,19 +265,23 @@ export async function runChatCommand(
       handleSubmit(message);
     },
     onInput: (data, editor) => {
+      if (shouldIgnoreChatInput(data)) {
+        return undefined;
+      }
+
       if (matchesKey(data, "ctrl+t")) {
         ui.toggleToolsExpanded();
         return { consume: true };
       }
 
-      if (matchesKey(data, "escape") && activeTurn !== undefined) {
-        interruptActiveTurn();
+      if (matchesKey(data, "escape") && localWait !== undefined) {
+        cancelLocalWait();
         return { consume: true };
       }
 
       if (
         matchesKey(data, "enter") &&
-        activeTurn !== undefined &&
+        localWait !== undefined &&
         !editor.getText().trim().startsWith("/")
       ) {
         return { consume: true };
@@ -229,8 +291,8 @@ export async function runChatCommand(
         return undefined;
       }
 
-      if (activeTurn !== undefined) {
-        interruptActiveTurn();
+      if (localWait !== undefined) {
+        cancelLocalWait();
       } else if (editor.getText().length > 0) {
         editor.setText("");
         tui.requestRender();

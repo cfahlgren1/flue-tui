@@ -3,11 +3,13 @@ import chalk from "chalk";
 
 import type { FlueConnection } from "../client.js";
 import { summarize } from "../ui/format.js";
+import { formatPostAdmissionWaitError } from "../wait-error.js";
 
 interface SendCommandOptions {
   connection: FlueConnection;
   agent: string;
   id: string;
+  idProvided?: boolean;
   message: string;
   json: boolean;
 }
@@ -105,14 +107,37 @@ function createProgressRenderer(stderr: NodeJS.WritableStream) {
   };
 }
 
-function writeResult(result: AgentPromptResponse, json: boolean) {
+export function formatSendResult(
+  agent: string,
+  id: string,
+  submissionId: string,
+  result: AgentPromptResponse,
+) {
+  return {
+    agent,
+    id,
+    submissionId,
+    text: result.text,
+    usage: result.usage,
+    model: result.model,
+  };
+}
+
+function writeResult(
+  result: AgentPromptResponse,
+  json: boolean,
+  identity: { agent: string; id: string; submissionId: string },
+) {
   if (json) {
     process.stdout.write(
-      `${JSON.stringify({
-        text: result.text,
-        usage: result.usage,
-        model: result.model,
-      })}\n`,
+      `${JSON.stringify(
+        formatSendResult(
+          identity.agent,
+          identity.id,
+          identity.submissionId,
+          result,
+        ),
+      )}\n`,
     );
     return;
   }
@@ -126,6 +151,7 @@ export async function runSendCommand({
   connection,
   agent,
   id,
+  idProvided = true,
   message,
   json,
 }: SendCommandOptions): Promise<number> {
@@ -145,27 +171,53 @@ export async function runSendCommand({
   process.once("SIGINT", handleSigint);
 
   try {
+    if (!json && !idProvided) {
+      process.stderr.write(chalk.dim(`session ${id}\n`));
+    }
+
     const admission = await connection.send(message, {
       signal: controller.signal,
     });
     let result: AgentPromptResponse;
+    let settlement:
+      | Extract<ConversationStreamChunk, { type: "submission-settled" }>
+      | undefined;
 
     try {
       result = await connection.wait(admission, {
         signal: controller.signal,
-        onEvent: progress.render,
+        onEvent: (event) => {
+          progress.render(event);
+          if (
+            event.type === "submission-settled" &&
+            event.submissionId === admission.submissionId
+          ) {
+            settlement = event;
+          }
+        },
       });
     } catch (error) {
       progress.finish();
-      process.stderr.write(
-        `wait failed for agent "${agent}", instance id "${id}", submissionId "${admission.submissionId}"; ` +
-          "the durable submission may still be running and can be observed by re-running against the same instance id.\n",
-      );
+      if (!interrupted) {
+        process.stderr.write(
+          `${formatPostAdmissionWaitError({
+            agent,
+            id,
+            submissionId: admission.submissionId,
+            settlement,
+            error,
+          })}\n`,
+        );
+      }
       throw error;
     }
 
     progress.finish();
-    writeResult(result, json);
+    writeResult(result, json, {
+      agent,
+      id,
+      submissionId: admission.submissionId,
+    });
     return 0;
   } catch (error) {
     progress.finish();

@@ -55,4 +55,23 @@ describe("resolveInvocation", () => {
       message: "hello",
     });
   });
+
+  it("rejects --json for chat", () => {
+    expect(() => resolveInvocation(["--agent", "demo", "--json"])).toThrow(
+      "--json is only available for send",
+    );
+  });
+
+  it("rejects --tools for send", () => {
+    expect(() =>
+      resolveInvocation([
+        "send",
+        "hello",
+        "--agent",
+        "demo",
+        "--tools",
+        "full",
+      ]),
+    ).toThrow("--tools is only available for chat");
+  });
 });

@@ -41,9 +41,6 @@ export function createConnection(options: ConnectionOptions) {
         observeOptions,
       );
     },
-    history() {
-      return client.agents.history(options.agent, options.id);
-    },
     abort() {
       return client.agents.abort(options.agent, options.id);
     },

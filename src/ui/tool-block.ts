@@ -1,6 +1,7 @@
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 
 import { summarize } from "./format.js";
+import type { ToolPart } from "./reconcile.js";
 import { theme } from "./theme.js";
 
 const SUMMARY_MAX_LENGTH = 80;
@@ -8,18 +9,12 @@ const MAX_BLOCK_LINES = 40;
 
 export type ToolDisplayMode = "collapsed" | "full" | "hidden";
 
-export interface ToolBlockStart {
-  toolCallId: string;
-  toolName: string;
-  input?: unknown;
-}
-
 export interface ToolBlockResult {
   toolName: string;
   ok: boolean;
   output?: unknown;
   errorMessage?: string;
-  durationMs: number;
+  durationMs?: number;
 }
 
 function prettyJson(value: unknown): string {
@@ -90,22 +85,42 @@ function detailLines(
 export class ToolBlock extends Container {
   readonly toolCallId: string;
 
-  private readonly input: unknown;
-  private readonly initialToolName: string;
+  private input: unknown;
+  private initialToolName: string;
   private expanded: boolean;
   private result: ToolBlockResult | undefined;
 
-  constructor(start: ToolBlockStart, expanded: boolean) {
+  constructor(part: ToolPart, expanded: boolean) {
     super();
-    this.toolCallId = start.toolCallId;
-    this.initialToolName = start.toolName;
-    this.input = start.input;
+    this.toolCallId = part.toolCallId;
+    this.initialToolName = part.toolName;
+    this.input = part.input;
     this.expanded = expanded;
-    this.rebuild();
+    this.applyPart(part);
   }
 
-  complete(result: ToolBlockResult): void {
-    this.result = result;
+  update(part: ToolPart): void {
+    this.applyPart(part);
+  }
+
+  private applyPart(part: ToolPart): void {
+    this.initialToolName = part.toolName;
+    this.input = part.input;
+    if (part.state === "input-available") {
+      this.result = undefined;
+    } else if (part.state === "output-available") {
+      this.result = {
+        toolName: part.toolName,
+        ok: true,
+        output: part.output,
+      };
+    } else {
+      this.result = {
+        toolName: part.toolName,
+        ok: false,
+        errorMessage: part.errorText,
+      };
+    }
     this.rebuild();
   }
 
@@ -132,20 +147,20 @@ export class ToolBlock extends Container {
         new Text(theme.toolRunning(`◌ tool ${toolName}${args}`), 1, 0),
       );
     } else if (this.result.ok) {
+      const duration =
+        this.result.durationMs === undefined
+          ? ""
+          : ` (${this.result.durationMs}ms)`;
       this.addChild(
-        new Text(
-          theme.toolSuccess(`✓ ${toolName} (${this.result.durationMs}ms)`),
-          1,
-          0,
-        ),
+        new Text(theme.toolSuccess(`✓ ${toolName}${duration}`), 1, 0),
       );
     } else {
+      const duration =
+        this.result.durationMs === undefined
+          ? ""
+          : ` (${this.result.durationMs}ms)`;
       this.addChild(
-        new Text(
-          theme.toolError(`✗ ${toolName} (${this.result.durationMs}ms)`),
-          1,
-          0,
-        ),
+        new Text(theme.toolError(`✗ ${toolName}${duration}`), 1, 0),
       );
     }
 
