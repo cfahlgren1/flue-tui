@@ -1,152 +1,134 @@
 # flue-tui
 
-Talk to Flue agents from the terminal with streaming Markdown responses, live
-tool calls, durable sessions, slash commands, and token/cost tracking.
+flue-tui is an interactive terminal chat client for any [Flue](https://flueframework.com) agent. It renders streaming responses and thinking, updates live tool-call blocks in place, resumes durable sessions, and keeps cumulative token usage and cost visible in the footer.
+
+> Status: beta.
 
 ## Requirements
 
 - Node.js 22.19 or newer
 - A running Flue application with an exposed agent
 
-## Install
+## Install and run
 
-Install the CLI from npm:
-
-```sh
-npm install --global flue-tui
-```
-
-To install this checkout instead:
+From this checkout:
 
 ```sh
 corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm build
-pnpm link --global
+node dist/index.js --help
 ```
+
+Once the package is published, the equivalent one-off invocation will be:
+
+```sh
+npx flue-tui --agent demo
+```
+
+flue-tui is not yet published to npm.
 
 ## Quickstart
 
-The included demo agent runs locally on port 3583. In one terminal:
+The included demo agent runs on `http://127.0.0.1:3583`. Start it in one terminal with either a direct Anthropic API key or an Anthropic-compatible gateway override:
 
 ```sh
 cd examples/demo-agent
 npm install
+
+# Direct Anthropic access:
 export ANTHROPIC_API_KEY=your-key
+
+# Or use a gateway:
+# export ANTHROPIC_BASE_URL=https://your-gateway.example
+
 npm run dev
 ```
 
-In another terminal, start an interactive chat:
+From the repository root in a second terminal:
 
 ```sh
-flue-tui --agent demo
+node dist/index.js --agent demo
 ```
 
-Enter submits a message. The last line shows the connection target, session
-id, cumulative input/output tokens and cost, and whether the client is idle or
-working. Type `/help` for the in-chat command list or `/exit` to leave.
+Send a message with Enter. The footer shows the target, session id, cumulative input and output tokens, cost, and current state.
 
-## Usage
+## Command-line reference
 
-Start an interactive chat against the default local URL:
-
-```sh
-flue-tui --agent demo
+```text
+flue-tui [url] --agent <name> [chat options]
+flue-tui [url] send <message> --agent <name> [send options]
 ```
 
-Pass a Flue base URL as the first positional argument for a remote app:
+`[url]` defaults to `http://127.0.0.1:3583` and must appear before `send`. The one-shot `send` command streams response, thinking, and tool progress to stderr. It writes the final response to stdout when stdout is piped or redirected; `--json` always writes structured output.
 
-```sh
-flue-tui https://flue.example.com/api --agent support --id ticket-42
-```
+| Flag | Chat | Send | Description |
+| --- | :---: | :---: | --- |
+| `[url]` | Yes | Yes | Flue base URL; defaults to `http://127.0.0.1:3583` |
+| `--agent <name>` | Yes | Yes | Agent name; required |
+| `--id <id>` | Yes | Yes | Durable server-side session id; resumes that session when supplied |
+| `--token <bearer>` | Yes | Yes | Bearer token; overrides `FLUE_TOKEN` |
+| `--header k=v` | Yes | Yes | Additional request header; repeat for multiple headers |
+| `--tools <mode>` | Yes | No | Initial tool display: `collapsed`, `full`, or `hidden`; defaults to `collapsed` |
+| `--json` | No | Yes | Write the final text, identity, model, and usage as JSON |
+| `--help`, `-h` | Yes | Yes | Show usage |
+| `--version` | Yes | Yes | Print the installed version |
 
-Send one prompt without opening the TUI:
-
-```sh
-flue-tui send "roll two dice and tell me the time" --agent demo
-```
-
-The one-shot command streams progress and tool activity to stderr. Its final
-assistant response is written to stdout when output is piped or redirected;
-use `--json` for the response text, identity, model, and usage as JSON.
-
-```sh
-flue-tui https://flue.example.com/api send "hello" \
-  --agent support \
-  --id ticket-42 \
-  --token "$FLUE_TOKEN" \
-  --header x-tenant=acme \
-  --json
-```
-
-### Flags
-
-| Flag | Applies to | Description |
-| --- | --- | --- |
-| `[url]` | chat, send | Flue base URL; defaults to `http://127.0.0.1:3583` |
-| `--agent <name>` | chat, send | Agent name; required |
-| `--id <id>` | chat, send | Persistent agent session id; chat resumes when supplied |
-| `--token <bearer>` | chat, send | Bearer token; overrides `FLUE_TOKEN` |
-| `--header k=v` | chat, send | Additional request header; repeat for multiple headers |
-| `--tools <mode>` | chat | Initial tool display: `collapsed`, `full`, or `hidden` |
-| `--json` | send | Print the final one-shot result as JSON |
-| `--help`, `-h` | all | Show CLI usage |
-| `--version` | all | Print the installed version |
-
-### Chat commands
-
-| Command | Description |
+| Environment variable | Description |
 | --- | --- |
-| `/help` | Show available commands with descriptions |
-| `/id` | Show the current agent and session id |
-| `/new` | Start a new generated session and clear the transcript |
-| `/abort` | Abort running and queued server-side work for this session |
-| `/exit` | Exit flue-tui |
-| `/tools <collapsed\|full\|hidden>` | Change the tool display mode at runtime |
+| `FLUE_TOKEN` | Default bearer token when `--token` is omitted |
 
-Type `/` to open slash autocomplete. Tab accepts a command completion and also
-completes file paths where pi-tui supports them.
+| Exit code | Meaning |
+| ---: | --- |
+| `0` | Success or a normal interactive exit |
+| `1` | Runtime, network, or agent error |
+| `2` | Invalid command-line usage |
+| `130` | One-shot `send` interrupted with Ctrl+C |
 
-## Keybindings
+## Keybindings and slash commands
 
 | Key | Action |
 | --- | --- |
-| Enter | Submit the editor contents |
-| Alt+Enter | Insert a newline; Shift+Enter and Ctrl+Enter also work when the terminal reports them distinctly |
-| Tab | Accept autocomplete or complete a file path |
-| Esc | Interrupt the local wait for a busy turn; the agent keeps running server-side |
-| Ctrl+T | Toggle tool blocks between collapsed and full; hidden mode remains hidden |
+| Enter | Submit the editor contents; non-command submissions are ignored while a turn is active |
+| Alt+Enter | Insert a newline |
+| Up / Down | Move through submitted message history |
 | Ctrl+C while working | Interrupt the local wait; the agent keeps running server-side |
 | Ctrl+C with editor text | Clear the editor |
-| Ctrl+C with an empty idle editor | Exit flue-tui |
+| Ctrl+C with an empty, idle editor | Exit flue-tui |
+| Esc while working | Interrupt the local wait; the agent keeps running server-side |
+| Ctrl+T | Toggle tool blocks between collapsed and full; hidden mode remains hidden |
+
+| Command | Action |
+| --- | --- |
+| `/help` | Show the available slash commands |
+| `/id` | Show the current agent and session id |
+| `/new` | Switch to a new generated session and clear the transcript |
+| `/abort` | Abort running and queued server-side work for the current session |
+| `/tools <collapsed\|full\|hidden>` | Change the tool display mode |
+| `/exit` | Exit flue-tui |
 
 ## Sessions
 
-Flue agent sessions are durable on the server. Without `--id`, flue-tui creates
-and displays a new id. Supply an existing id to hydrate its transcript and
-continue the conversation:
+Flue sessions are durable on the server. Without `--id`, flue-tui generates and displays a new id. Supply an existing id to hydrate its transcript and continue the conversation:
 
 ```sh
-flue-tui --agent support --id ticket-42
+node dist/index.js --agent support --id ticket-42
 ```
 
-`/new` switches to a freshly generated id. The previous session remains on the
-server and can be resumed later with `--id`. Esc and Ctrl+C only stop the local
-wait during a turn; use `/abort` when the server-side work itself should stop.
+`/new` switches to a fresh id and clears the local transcript. The previous session remains on the server and can be resumed later with `--id`.
 
-If the wait stream disconnects after a submission is admitted, flue-tui keeps
-the durable recovery notice visible and performs one history refresh after two
-seconds. A completed response found by that refresh is rendered with a dim
-`(recovered)` marker.
+Esc and Ctrl+C during an active turn interrupt only the local wait; server-side work continues. Use `/abort` to abort running and queued work for the current server session. If an admitted submission's wait stream disconnects, flue-tui keeps a recovery notice visible and performs one history refresh after two seconds; a completed response found there is rendered with a dim `(recovered)` marker.
 
-## Environment variables
+## Architecture
 
-| Variable | Description |
-| --- | --- |
-| `FLUE_TOKEN` | Default bearer token for the CLI when `--token` is omitted |
-| `ANTHROPIC_API_KEY` | Anthropic API key used by the demo agent |
-| `ANTHROPIC_BASE_URL` | Optional Anthropic-compatible gateway or proxy URL for the demo |
-| `DEMO_AGENT_MODEL` | Optional demo model override; defaults to `anthropic/claude-haiku-4-5` |
+`@earendil-works/pi-tui` provides terminal rendering and input. `@flue/sdk`'s `observe({ live: "sse" })` stream is the canonical transcript: the reconciler maps each text, reasoning, and tool part to a stable block, updates changed parts in place, and replaces the transcript only when its identity or structure changes.
+
+```text
+agent server --observe() SSE--> reconciler --> pi-tui blocks
+input editor ------send()-----> submission --> wait() --> usage footer
+```
+
+This keeps rendering derived from durable server state instead of maintaining a separate client-side transcript.
 
 ## Development
 
@@ -157,3 +139,19 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+| Script | Purpose |
+| --- | --- |
+| `pnpm dev --agent demo` | Run the CLI directly from TypeScript |
+| `pnpm typecheck` | Type-check without emitting files |
+| `pnpm test` | Run unit tests; E2E suites remain skipped unless `E2E=1` |
+| `pnpm build` | Compile the executable to `dist/` |
+| `E2E=1 pnpm test:e2e` | Run the serial end-to-end suites against the demo server and mock model |
+
+GitHub Actions runs three jobs on pushes and pull requests:
+
+| Job | Checks |
+| --- | --- |
+| `ci` | Install, type-check, unit tests, build, and built CLI version smoke test |
+| `demo-agent` | Install and type-check `examples/demo-agent` |
+| `e2e` | Build the CLI and run the E2E suites with `E2E=1` |
