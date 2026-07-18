@@ -2,3 +2,7 @@ node_modules
 dist
 *.log
 .DS_Store
+examples/demo-agent/node_modules
+examples/demo-agent/.flue
+examples/demo-agent/dist
+*.db
