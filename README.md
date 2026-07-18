@@ -2,7 +2,7 @@
 
 An interactive terminal chat for any [Flue](https://flueframework.com) agent — streaming responses and thinking, live tool-call blocks, durable sessions you can resume, and a token/cost footer.
 
-![flue-tui demo](demo.gif)
+![flue-tui demo](https://raw.githubusercontent.com/cfahlgren1/flue-tui/main/demo.gif)
 
 ## Install
 
