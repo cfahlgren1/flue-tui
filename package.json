@@ -1,6 +1,6 @@
 {
   "name": "flue-tui",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "interactive terminal chat client for flue agents",
   "repository": "https://github.com/cfahlgren1/flue-tui",
   "homepage": "https://github.com/cfahlgren1/flue-tui#readme",
