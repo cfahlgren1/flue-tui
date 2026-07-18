@@ -196,7 +196,10 @@ export function resolveInvocation(args: string[]): CliInvocation {
   }
 
   if (parsed.agent === undefined) {
-    throw new Error("chat requires --agent <name>");
+    throw new Error(
+      "chat requires --agent <name>; quickstart: " +
+        "cd examples/demo-agent && npm run dev; then flue-tui --agent demo",
+    );
   }
 
   return {

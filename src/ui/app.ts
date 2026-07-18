@@ -6,6 +6,7 @@ import {
   type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
+import type { PromptUsage } from "@flue/sdk";
 
 import {
   AssistantMessageBlock,
@@ -13,6 +14,8 @@ import {
   ReasoningBlock,
   UserMessageBlock,
 } from "./blocks.js";
+import { createChatAutocompleteProvider } from "./commands.js";
+import { emptyUsageTotals, StatusFooter } from "./footer.js";
 import type { ReconcileUi } from "./reconcile.js";
 import { theme } from "./theme.js";
 import { ToolBlock, type ToolDisplayMode } from "./tool-block.js";
@@ -37,19 +40,28 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   const chatContainer = new Container();
   const statusArea = new Container();
   const editor = new Editor(tui, theme.editor);
+  editor.setAutocompleteProvider(createChatAutocompleteProvider());
   const header = new Text(
     theme.header(`flue-tui · ${agent}@${url} · ${id}`),
     1,
     1,
   );
   const toolBlocks = new Map<string, ToolBlock>();
-  let toolsExpanded = tools === "full";
+  const footer = new StatusFooter({
+    agent,
+    url,
+    id,
+    usage: emptyUsageTotals(),
+    state: "idle",
+  });
+  let toolsMode = tools;
   let loader: Loader | undefined;
 
   tui.addChild(header);
   tui.addChild(chatContainer);
   tui.addChild(statusArea);
   tui.addChild(editor);
+  tui.addChild(footer);
   tui.setFocus(editor);
 
   const requestRender = () => tui.requestRender();
@@ -61,6 +73,7 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
 
   const setId = (nextId: string) => {
     header.setText(theme.header(`flue-tui · ${agent}@${url} · ${nextId}`));
+    footer.setId(nextId);
     requestRender();
   };
 
@@ -71,6 +84,7 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
   };
 
   const setBusy = (busy: boolean) => {
+    footer.setState(busy ? "working" : "idle");
     if (busy && loader === undefined) {
       loader = new Loader(
         tui,
@@ -117,10 +131,7 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
       };
     },
     createToolBlock(part) {
-      if (tools === "hidden") {
-        return { update: () => undefined };
-      }
-      const block = new ToolBlock(part, toolsExpanded);
+      const block = new ToolBlock(part, toolsMode);
       return {
         block,
         update(nextPart) {
@@ -142,15 +153,32 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     },
   };
 
-  const toggleToolsExpanded = () => {
-    if (tools === "hidden") {
+  const setToolsMode = (mode: ToolDisplayMode) => {
+    if (toolsMode === mode) {
       return;
     }
 
-    toolsExpanded = !toolsExpanded;
+    toolsMode = mode;
     for (const block of toolBlocks.values()) {
-      block.setExpanded(toolsExpanded);
+      block.setDisplayMode(mode);
     }
+    requestRender();
+  };
+
+  const toggleToolsExpanded = () => {
+    if (toolsMode === "hidden") {
+      return;
+    }
+    setToolsMode(toolsMode === "full" ? "collapsed" : "full");
+  };
+
+  const recordUsage = (usage: PromptUsage) => {
+    footer.recordUsage(usage);
+    requestRender();
+  };
+
+  const addRecoveredMarker = () => {
+    chatContainer.addChild(new Text(theme.muted("(recovered)"), 1, 0));
     requestRender();
   };
 
@@ -170,6 +198,9 @@ export function createChatUi({ tui, agent, url, id, tools }: ChatUiOptions) {
     setId,
     clearTranscript,
     setBusy,
+    recordUsage,
+    addRecoveredMarker,
+    setToolsMode,
     toggleToolsExpanded,
     readLoop,
   };

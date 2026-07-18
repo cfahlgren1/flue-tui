@@ -87,15 +87,15 @@ export class ToolBlock extends Container {
 
   private input: unknown;
   private initialToolName: string;
-  private expanded: boolean;
+  private displayMode: ToolDisplayMode;
   private result: ToolBlockResult | undefined;
 
-  constructor(part: ToolPart, expanded: boolean) {
+  constructor(part: ToolPart, displayMode: ToolDisplayMode) {
     super();
     this.toolCallId = part.toolCallId;
     this.initialToolName = part.toolName;
     this.input = part.input;
-    this.expanded = expanded;
+    this.displayMode = displayMode;
     this.applyPart(part);
   }
 
@@ -124,17 +124,21 @@ export class ToolBlock extends Container {
     this.rebuild();
   }
 
-  setExpanded(expanded: boolean): void {
-    if (this.expanded === expanded) {
+  setDisplayMode(displayMode: ToolDisplayMode): void {
+    if (this.displayMode === displayMode) {
       return;
     }
 
-    this.expanded = expanded;
+    this.displayMode = displayMode;
     this.rebuild();
   }
 
   private rebuild(): void {
     this.clear();
+    if (this.displayMode === "hidden") {
+      return;
+    }
+
     this.addChild(new Spacer(1));
 
     const toolName = this.result?.toolName ?? this.initialToolName;
@@ -164,7 +168,7 @@ export class ToolBlock extends Container {
       );
     }
 
-    if (this.expanded) {
+    if (this.displayMode === "full") {
       const lines = detailLines(this.input, this.result);
       const splitAt = lines.indexOf("error");
 

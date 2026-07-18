@@ -154,6 +154,40 @@ describe("createReconciler", () => {
     expect(block?.updates).toBe(1);
   });
 
+  it("replaces streaming text with the authoritative completed text once", () => {
+    const testUi = createTestUi();
+    const reconciler = createReconciler(testUi.ui);
+    const message = {
+      id: "assistant-1",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: "text" as const,
+          text: "**partial",
+          state: "streaming" as const,
+        },
+      ],
+    };
+
+    reconciler.reconcile(state([message]));
+    const block = testUi.transcript[0];
+    const completed = state([
+      {
+        ...message,
+        parts: [
+          { type: "text", text: "**final**", state: "done" as const },
+        ],
+      },
+    ]);
+
+    reconciler.reconcile(completed);
+    reconciler.reconcile(completed);
+
+    expect(testUi.transcript).toEqual([block]);
+    expect(block?.part).toMatchObject({ text: "**final**", state: "done" });
+    expect(block?.updates).toBe(1);
+  });
+
   it("mutates one tool block through running, done, and error states", () => {
     const testUi = createTestUi();
     const reconciler = createReconciler(testUi.ui);

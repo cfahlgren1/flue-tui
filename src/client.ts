@@ -1,6 +1,7 @@
 import {
   createFlueClient,
   type AgentConversationObserveOptions,
+  type FlueConversationHistoryOptions,
   type AgentPromptResponse,
   type AgentSendResult,
   type AgentWaitOptions,
@@ -40,6 +41,9 @@ export function createConnection(options: ConnectionOptions) {
         options.id,
         observeOptions,
       );
+    },
+    history(historyOptions: FlueConversationHistoryOptions = {}) {
+      return client.agents.history(options.agent, options.id, historyOptions);
     },
     abort() {
       return client.agents.abort(options.agent, options.id);

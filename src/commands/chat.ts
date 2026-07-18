@@ -1,18 +1,29 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import {
   isKeyRelease,
   matchesKey,
   ProcessTerminal,
   TUI,
 } from "@earendil-works/pi-tui";
+import {
+  DurableStreamError,
+  FetchBackoffAbortError,
+  FetchError,
+} from "@flue/sdk";
 import type {
   AgentConversationObservation,
   AgentSendResult,
   ConversationStreamChunk,
+  FlueConversationMessage,
+  FlueConversationSnapshot,
+  FlueConversationState,
 } from "@flue/sdk";
 
 import { generateId } from "../args.js";
 import { createConnection, type ConnectionOptions } from "../client.js";
 import { createChatUi } from "../ui/app.js";
+import { helpLines, isToolDisplayMode } from "../ui/commands.js";
 import { createReconciler } from "../ui/reconcile.js";
 import type { ToolDisplayMode } from "../ui/tool-block.js";
 import {
@@ -29,6 +40,38 @@ interface LocalWait {
 interface ChatCommandOptions extends ConnectionOptions {
   tools: ToolDisplayMode;
   resume: boolean;
+}
+
+type Conversation = FlueConversationSnapshot | FlueConversationState;
+
+function messageFingerprint(message: FlueConversationMessage): string {
+  return JSON.stringify(message.parts);
+}
+
+function isCompletedAssistantMessage(
+  message: FlueConversationMessage,
+): boolean {
+  return (
+    message.role === "assistant" &&
+    message.parts.every((part) => {
+      if (part.type === "text" || part.type === "reasoning") {
+        return part.state === "done";
+      }
+      if (part.type === "dynamic-tool") {
+        return part.state !== "input-available";
+      }
+      return true;
+    })
+  );
+}
+
+function isTransportWaitError(error: unknown): boolean {
+  return (
+    error instanceof DurableStreamError ||
+    error instanceof FetchBackoffAbortError ||
+    error instanceof FetchError ||
+    error instanceof TypeError
+  );
 }
 
 export function shouldIgnoreChatInput(data: string): boolean {
@@ -48,6 +91,16 @@ export async function runChatCommand(
   let removeInputListener: () => void = () => undefined;
   let finish!: (code: number) => void;
   let reconciler = createReconciler(ui.reconcileUi);
+  let renderedMessageFingerprints = new Map<string, string>();
+
+  const rememberRenderedConversation = (conversation: Conversation) => {
+    renderedMessageFingerprints = new Map(
+      conversation.messages.map((message) => [
+        message.id,
+        messageFingerprint(message),
+      ]),
+    );
+  };
 
   const closeObservation = () => {
     removeObservationListener();
@@ -79,6 +132,7 @@ export async function runChatCommand(
       const snapshot = nextObservation.getSnapshot();
       if (snapshot.conversation !== undefined) {
         reconciler.reconcile(snapshot.conversation);
+        rememberRenderedConversation(snapshot.conversation);
         ui.requestRender();
         if (resumeNoticePending) {
           resumeNoticePending = false;
@@ -99,6 +153,59 @@ export async function runChatCommand(
         ui.addNotice(`observation failed: ${errorMessage(snapshot.error)}`);
       }
     });
+  };
+
+  const recoverSubmission = async (
+    wait: LocalWait,
+    waitConnection: typeof connection,
+    waitId: string,
+    submissionId: string,
+  ) => {
+    try {
+      await delay(2_000, undefined, { signal: wait.controller.signal });
+    } catch {
+      return;
+    }
+
+    if (
+      wait.interrupted ||
+      currentId !== waitId ||
+      connection !== waitConnection
+    ) {
+      return;
+    }
+
+    try {
+      const snapshot = await waitConnection.history({
+        signal: wait.controller.signal,
+      });
+      const recoveredMessage = snapshot.messages.findLast(
+        (message) =>
+          message.submissionId === submissionId &&
+          isCompletedAssistantMessage(message),
+      );
+
+      if (
+        recoveredMessage === undefined ||
+        renderedMessageFingerprints.get(recoveredMessage.id) ===
+          messageFingerprint(recoveredMessage)
+      ) {
+        return;
+      }
+
+      closeObservation();
+      reconciler.reconcile(snapshot);
+      rememberRenderedConversation(snapshot);
+      if (recoveredMessage.metadata?.usage !== undefined) {
+        ui.recordUsage(recoveredMessage.metadata.usage);
+      }
+      ui.addRecoveredMarker();
+      openObservation(false);
+    } catch (error) {
+      if (!wait.interrupted && currentId === waitId) {
+        ui.addNotice(`recovery refresh failed: ${errorMessage(error)}`);
+      }
+    }
   };
 
   const sendMessage = async (message: string) => {
@@ -127,7 +234,7 @@ export async function runChatCommand(
           observation.refresh();
         }
       }
-      await waitConnection.wait(admission, {
+      const result = await waitConnection.wait(admission, {
         signal: wait.controller.signal,
         onEvent: (event) => {
           if (
@@ -138,6 +245,7 @@ export async function runChatCommand(
           }
         },
       });
+      ui.recordUsage(result.usage);
     } catch (error) {
       if (!wait.interrupted) {
         if (admission !== undefined) {
@@ -155,6 +263,14 @@ export async function runChatCommand(
               error,
             }),
           );
+          if (isTransportWaitError(error)) {
+            await recoverSubmission(
+              wait,
+              waitConnection,
+              waitId,
+              admission.submissionId,
+            );
+          }
         } else {
           ui.addNotice(`error: ${errorMessage(error)}`);
         }
@@ -191,6 +307,7 @@ export async function runChatCommand(
     currentId = generateId();
     connection = createConnection({ ...options, id: currentId });
     reconciler = createReconciler(ui.reconcileUi);
+    renderedMessageFingerprints.clear();
     ui.clearTranscript();
     ui.setId(currentId);
     openObservation(false);
@@ -229,18 +346,28 @@ export async function runChatCommand(
     }
 
     if (message.startsWith("/")) {
-      const command = message.split(/\s/, 1)[0];
+      const [command, ...commandArgs] = message.split(/\s+/);
       if (command === "/exit") {
         cancelLocalWait(false);
         finish(0);
       } else if (command === "/help") {
-        ui.addNotice("commands: /help, /id, /new, /abort, /exit");
+        for (const line of helpLines()) {
+          ui.addNotice(line);
+        }
       } else if (command === "/id") {
         ui.addNotice(`agent ${options.agent}, session ${currentId}`);
       } else if (command === "/new") {
         startNewSession();
       } else if (command === "/abort") {
         void abortSession();
+      } else if (command === "/tools") {
+        const mode = commandArgs[0];
+        if (mode === undefined || !isToolDisplayMode(mode)) {
+          ui.addNotice("usage: /tools <collapsed|full|hidden>");
+        } else {
+          ui.setToolsMode(mode);
+          ui.addNotice(`tool display mode: ${mode}`);
+        }
       } else {
         ui.addNotice(`unknown command: ${command}`);
       }

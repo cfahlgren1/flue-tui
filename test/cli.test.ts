@@ -131,4 +131,23 @@ describe("main", () => {
     await expect(main(["--unknown", "--version"])).resolves.toBe(0);
     expect(log).toHaveBeenCalledWith(version);
   });
+
+  it("shows help without requiring an agent", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(main(["--help"])).resolves.toBe(0);
+    expect(log).toHaveBeenCalledOnce();
+  });
+
+  it("prints the demo quickstart when chat has no agent", async () => {
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    await expect(main([])).resolves.toBe(2);
+    expect(write).toHaveBeenCalledOnce();
+    expect(write.mock.calls[0]?.[0]).toContain(
+      "cd examples/demo-agent && npm run dev; then flue-tui --agent demo",
+    );
+  });
 });
