@@ -40,18 +40,15 @@ const getTime = defineTool({
   run({ input }) {
     const now = new Date();
 
-    if (input.timezone) {
-      try {
-        new Intl.DateTimeFormat(undefined, { timeZone: input.timezone });
-      } catch {
-        throw new Error(`Invalid timezone: ${input.timezone}`);
-      }
+    let local: string;
+    try {
+      local = now.toLocaleString("en-US", {
+        timeZone: input.timezone,
+        timeZoneName: "short",
+      });
+    } catch {
+      throw new Error(`Invalid timezone: ${input.timezone}`);
     }
-
-    const local = now.toLocaleString("en-US", {
-      timeZone: input.timezone,
-      timeZoneName: "short",
-    });
 
     return `${local} (${now.toISOString()})`;
   },

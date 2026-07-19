@@ -1,14 +1,12 @@
 import type {
   AgentConversationObservation,
   AgentConversationObservationSnapshot,
+  FlueConversationSnapshot,
   FlueConversationState,
 } from "@flue/sdk";
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  ConnectionOptions,
-  FlueConnection,
-} from "../src/client.js";
+import type { ConnectionOptions, FlueConnection } from "../src/client.js";
 import {
   createChatController,
   shouldIgnoreChatInput,
@@ -322,6 +320,55 @@ describe("chat lifecycle", () => {
     await expect(done).resolves.toBe(0);
   });
 
+  it("treats an unreachable new session as an initial connection", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstObservation = new FakeObservation();
+      const nextObservation = new FakeObservation();
+      const firstConnection = {
+        observe: vi.fn(() => firstObservation),
+      } as unknown as FlueConnection;
+      const nextConnection = {
+        observe: vi.fn(() => nextObservation),
+      } as unknown as FlueConnection;
+      const fakeUi = createFakeUi();
+      const done = createChatController({
+        options,
+        connection: firstConnection,
+        connectionFactory: vi.fn(() => nextConnection),
+        ui: fakeUi.ui,
+      }).run();
+
+      firstObservation.publish({
+        conversationId: "conversation-old",
+        settlements: [],
+        messages: [],
+      });
+      fakeUi.submit("/new");
+      nextObservation.publishSnapshot({
+        conversation: undefined,
+        offset: undefined,
+        phase: "connecting",
+        error: new Error("refused"),
+      });
+
+      expect(fakeUi.notices).not.toContain("connection lost — retrying");
+      expect(fakeUi.notices).not.toContain(
+        "cannot reach https://flue.test — retrying",
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fakeUi.notices).toContain(
+        "cannot reach https://flue.test — retrying",
+      );
+
+      fakeUi.submit("/exit");
+      await expect(done).resolves.toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows one reconnecting notice per live connection loss", async () => {
     const observation = new FakeObservation();
     const connection = {
@@ -444,60 +491,68 @@ describe("chat lifecycle", () => {
   });
 
   it.each([
-    ["a completed settlement", true],
-    ["completed message parts alone", false],
-  ])("marks recovery only from %s", async (_case, hasSettlement) => {
-    try {
-      const observation = new FakeObservation();
-      const history = vi.fn().mockResolvedValue({
-        v: 1,
-        conversationId: "conversation-1",
-        offset: "2",
-        settlements: hasSettlement
-          ? [
-              {
-                submissionId: "submission-1",
-                outcome: "completed",
-              },
-            ]
-          : [],
-        messages: [
-          {
-            id: "assistant-1",
-            role: "assistant",
+    ["a completed settlement", true, false, 1],
+    ["completed message parts alone", false, false, 0],
+    ["an already-rendered completed response", true, true, 0],
+  ])(
+    "marks recovery only from %s",
+    async (_case, hasSettlement, alreadyRendered, expectedMarkers) => {
+      try {
+        const observation = new FakeObservation();
+        const historySnapshot = {
+          v: 1,
+          conversationId: "conversation-1",
+          offset: "2",
+          settlements: hasSettlement
+            ? [
+                {
+                  submissionId: "submission-1",
+                  outcome: "completed",
+                },
+              ]
+            : [],
+          messages: [
+            {
+              id: "assistant-1",
+              role: "assistant",
+              submissionId: "submission-1",
+              parts: [{ type: "text", text: "done", state: "done" }],
+            },
+          ],
+        } satisfies FlueConversationSnapshot;
+        const history = vi.fn().mockResolvedValue(historySnapshot);
+        const connection = {
+          observe: vi.fn(() => observation),
+          send: vi.fn().mockResolvedValue({
+            streamUrl: "https://flue.test/stream",
+            offset: "0",
             submissionId: "submission-1",
-            parts: [{ type: "text", text: "done", state: "done" }],
-          },
-        ],
-      });
-      const connection = {
-        observe: vi.fn(() => observation),
-        send: vi.fn().mockResolvedValue({
-          streamUrl: "https://flue.test/stream",
-          offset: "0",
-          submissionId: "submission-1",
-        }),
-        wait: vi.fn().mockRejectedValue(new TypeError("stream disconnected")),
-        history,
-      } as unknown as FlueConnection;
-      const fakeUi = createFakeUi();
-      const done = createChatController({
-        options,
-        connection,
-        connectionFactory: vi.fn(() => connection),
-        ui: fakeUi.ui,
-        recoveryDelay: vi.fn().mockResolvedValue(undefined),
-      }).run();
+          }),
+          wait: vi.fn().mockRejectedValue(new TypeError("stream disconnected")),
+          history,
+        } as unknown as FlueConnection;
+        const fakeUi = createFakeUi();
+        const done = createChatController({
+          options,
+          connection,
+          connectionFactory: vi.fn(() => connection),
+          ui: fakeUi.ui,
+          recoveryDelay: vi.fn().mockResolvedValue(undefined),
+        }).run();
 
-      fakeUi.submit("hello");
-      await vi.waitFor(() => expect(history).toHaveBeenCalledOnce());
+        if (alreadyRendered) {
+          observation.publish(historySnapshot);
+        }
+        fakeUi.submit("hello");
+        await vi.waitFor(() => expect(history).toHaveBeenCalledOnce());
 
-      expect(fakeUi.recoveredMarkers).toBe(hasSettlement ? 1 : 0);
+        expect(fakeUi.recoveredMarkers).toBe(expectedMarkers);
 
-      fakeUi.submit("/exit");
-      await expect(done).resolves.toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        fakeUi.submit("/exit");
+        await expect(done).resolves.toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });

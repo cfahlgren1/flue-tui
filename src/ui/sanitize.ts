@@ -88,7 +88,7 @@ function skipEscSequence(value: string, escapeIndex: number): number {
 export function sanitizeText(value: string): string {
   let result = "";
 
-  for (let index = 0; index < value.length; ) {
+  for (let index = 0; index < value.length;) {
     const code = value.charCodeAt(index);
     if (code === ESC) {
       index = skipEscSequence(value, index);

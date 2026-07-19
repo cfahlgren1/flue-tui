@@ -88,11 +88,15 @@ export async function startDemoServer({
   );
 
   let logs = "";
-  const child = spawn(process.execPath, [flueCli, "dev", "--port", String(port)], {
-    cwd: demoAgentDirectory,
-    env: { ...process.env, ...env },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [flueCli, "dev", "--port", String(port)],
+    {
+      cwd: demoAgentDirectory,
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   const capture = (chunk: Buffer) => {
     logs = `${logs}${chunk.toString("utf8")}`.slice(-20_000);
   };

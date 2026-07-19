@@ -6,8 +6,13 @@ An interactive terminal chat for any [Flue](https://flueframework.com) agent —
 
 ## Install
 
+The npm package is not published yet. Until the first release, install it from source:
+
 ```sh
-npm install -g flue-tui   # or: npx flue-tui
+git clone https://github.com/cfahlgren1/flue-tui.git
+cd flue-tui
+corepack enable pnpm && pnpm install --frozen-lockfile
+pnpm build && npm link
 ```
 
 Requires Node.js 22.19+ and a running Flue app with an agent that exports `route`.
@@ -44,8 +49,8 @@ Then in another terminal: `flue-tui demo`.
 
 ```sh
 corepack enable pnpm && pnpm install --frozen-lockfile
-pnpm typecheck && pnpm test    # unit tests
-pnpm build                     # compile to dist/
+pnpm format                    # format source and configuration
+pnpm check                     # format check, lint, types, unit tests, and build
 E2E=1 pnpm test:e2e            # boots the demo agent against a mock model server
 ```
 

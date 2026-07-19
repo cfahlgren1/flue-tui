@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type {
   FlueConversationMessage,
   FlueConversationPart,
@@ -10,10 +12,7 @@ export type ReasoningPart = Extract<
   FlueConversationPart,
   { type: "reasoning" }
 >;
-export type ToolPart = Extract<
-  FlueConversationPart,
-  { type: "dynamic-tool" }
->;
+export type ToolPart = Extract<FlueConversationPart, { type: "dynamic-tool" }>;
 
 interface ReconciledBlock<TBlock, TPart extends FlueConversationPart> {
   block?: TBlock;
@@ -50,6 +49,11 @@ interface MessageRecord<TBlock> {
 
 type Conversation = FlueConversationSnapshot | FlueConversationState;
 
+export interface ReconcileResult {
+  changed: boolean;
+  changedMessageIds: Set<string>;
+}
+
 function renderableParts(message: FlueConversationMessage) {
   return message.parts.flatMap((part, index) => {
     if (part.type === "file") {
@@ -85,13 +89,14 @@ function samePart(left: RenderablePart, right: RenderablePart): boolean {
     left.toolCallId !== right.toolCallId ||
     left.toolName !== right.toolName ||
     left.state !== right.state ||
-    !Object.is(left.input, right.input)
+    !isDeepStrictEqual(left.input, right.input)
   ) {
     return false;
   }
   if (left.state === "output-available") {
     return (
-      right.state === "output-available" && Object.is(left.output, right.output)
+      right.state === "output-available" &&
+      isDeepStrictEqual(left.output, right.output)
     );
   }
   if (left.state === "output-error") {
@@ -165,7 +170,7 @@ export function createReconciler<TBlock>(ui: ReconcileUi<TBlock>) {
     });
   };
 
-  const replace = (conversation: Conversation) => {
+  const replace = (conversation: Conversation): ReconcileResult => {
     messages = conversation.messages.map(createMessageRecord);
     conversationId = conversation.conversationId;
     ui.replaceTranscript(
@@ -175,21 +180,26 @@ export function createReconciler<TBlock>(ui: ReconcileUi<TBlock>) {
         ),
       ),
     );
+    return {
+      changed: true,
+      changedMessageIds: new Set(messages.map((message) => message.id)),
+    };
   };
 
-  const reconcile = (conversation: Conversation) => {
+  const reconcile = (conversation: Conversation): ReconcileResult => {
     if (requiresReplacement(conversation)) {
-      replace(conversation);
-      return;
+      return replace(conversation);
     }
 
     conversationId = conversation.conversationId;
+    const changedMessageIds = new Set<string>();
 
     for (const [messageIndex, message] of conversation.messages.entries()) {
       let record = messages[messageIndex];
       if (record === undefined) {
         record = createMessageRecord(message);
         messages.push(record);
+        changedMessageIds.add(message.id);
         for (const part of record.parts) {
           if (part.block !== undefined) {
             ui.appendTranscriptBlock(part.block);
@@ -204,15 +214,22 @@ export function createReconciler<TBlock>(ui: ReconcileUi<TBlock>) {
         if (partRecord === undefined) {
           const nextRecord = createPartRecord(message.role, key, part);
           record.parts.push(nextRecord);
+          changedMessageIds.add(message.id);
           if (nextRecord.block !== undefined) {
             ui.appendTranscriptBlock(nextRecord.block);
           }
         } else if (!samePart(partRecord.part, part)) {
           partRecord.update(part);
           partRecord.part = part;
+          changedMessageIds.add(message.id);
         }
       }
     }
+
+    return {
+      changed: changedMessageIds.size > 0,
+      changedMessageIds,
+    };
   };
 
   return { reconcile };

@@ -155,9 +155,7 @@ export class ToolBlock extends Container {
         new Text(theme.toolRunning(`◌ tool ${toolName}${args}`), 1, 0),
       );
     } else if (this.result.ok) {
-      this.addChild(
-        new Text(theme.toolSuccess(`✓ ${toolName}`), 1, 0),
-      );
+      this.addChild(new Text(theme.toolSuccess(`✓ ${toolName}`), 1, 0));
     } else {
       this.addChild(new Text(theme.toolError(`✗ ${toolName}`), 1, 0));
     }

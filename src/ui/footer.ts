@@ -1,8 +1,5 @@
 import type { PromptUsage } from "@flue/sdk";
-import {
-  truncateToWidth,
-  type Component,
-} from "@earendil-works/pi-tui";
+import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
 import { sanitizeText } from "./sanitize.js";
 import { theme } from "./theme.js";

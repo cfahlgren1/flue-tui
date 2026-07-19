@@ -102,11 +102,7 @@ function writeJson(response: ServerResponse, request: AnthropicRequest) {
   );
 }
 
-function writeSseEvent(
-  response: ServerResponse,
-  event: string,
-  data: unknown,
-) {
+function writeSseEvent(response: ServerResponse, event: string, data: unknown) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
@@ -177,7 +173,9 @@ function writeStream(response: ServerResponse, request: AnthropicRequest) {
   response.end();
 }
 
-async function readRequest(request: IncomingMessage): Promise<AnthropicRequest> {
+async function readRequest(
+  request: IncomingMessage,
+): Promise<AnthropicRequest> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));

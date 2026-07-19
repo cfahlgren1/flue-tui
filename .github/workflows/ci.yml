@@ -5,8 +5,30 @@ on:
   pull_request:
 
 jobs:
-  ci:
+  quality:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: node dist/index.js --version
+      - name: Pack smoke test
+        run: |
+          smoke_dir=$(mktemp -d)
+          npm pack --cache "$smoke_dir/cache" --pack-destination "$smoke_dir"
+          tarball=$(find "$smoke_dir" -maxdepth 1 -name '*.tgz' -print -quit)
+          npm install --cache "$smoke_dir/cache" --prefix "$smoke_dir/install" "$tarball"
+          "$smoke_dir/install/node_modules/.bin/flue-tui" --version
+
+  platforms:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,13 +40,6 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node dist/index.js --version
-      - name: Pack smoke test
-        run: |
-          smoke_dir=$(mktemp -d)
-          npm pack --cache "$smoke_dir/cache" --pack-destination "$smoke_dir"
-          tarball=$(find "$smoke_dir" -maxdepth 1 -name '*.tgz' -print -quit)
-          npm install --cache "$smoke_dir/cache" --prefix "$smoke_dir/install" "$tarball"
-          "$smoke_dir/install/node_modules/.bin/flue-tui" --version
 
   demo-agent:
     runs-on: ubuntu-latest
@@ -36,7 +51,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+      - run: npm ci
       - run: npm run typecheck
 
   e2e:

@@ -1,13 +1,7 @@
-import type {
-  FlueConversationPart,
-  FlueConversationState,
-} from "@flue/sdk";
+import type { FlueConversationPart, FlueConversationState } from "@flue/sdk";
 import { describe, expect, it } from "vitest";
 
-import {
-  createReconciler,
-  type ReconcileUi,
-} from "../src/ui/reconcile.js";
+import { createReconciler, type ReconcileUi } from "../src/ui/reconcile.js";
 
 type RenderedBlock = {
   kind: "text" | "reasoning" | "tool";
@@ -174,9 +168,7 @@ describe("createReconciler", () => {
     const completed = state([
       {
         ...message,
-        parts: [
-          { type: "text", text: "**final**", state: "done" as const },
-        ],
+        parts: [{ type: "text", text: "**final**", state: "done" as const }],
       },
     ]);
 
@@ -293,5 +285,84 @@ describe("createReconciler", () => {
     );
 
     expect(testUi.transcript).toEqual([block]);
+  });
+
+  it("reports only messages whose rendered state changed", () => {
+    const testUi = createTestUi();
+    const reconciler = createReconciler(testUi.ui);
+    const userMessage = {
+      id: "user-1",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "hello", state: "done" as const }],
+    };
+
+    expect(reconciler.reconcile(state([userMessage]))).toEqual({
+      changed: true,
+      changedMessageIds: new Set(["user-1"]),
+    });
+    expect(
+      reconciler.reconcile(
+        state([{ ...userMessage, parts: [...userMessage.parts] }]),
+      ),
+    ).toEqual({
+      changed: false,
+      changedMessageIds: new Set(),
+    });
+    expect(
+      reconciler.reconcile(
+        state([
+          {
+            ...userMessage,
+            parts: [
+              { type: "text", text: "hello again", state: "done" as const },
+            ],
+          },
+        ]),
+      ),
+    ).toEqual({
+      changed: true,
+      changedMessageIds: new Set(["user-1"]),
+    });
+  });
+
+  it("does not report cloned tool payloads as changes", () => {
+    const testUi = createTestUi();
+    const reconciler = createReconciler(testUi.ui);
+    const toolMessage = {
+      id: "assistant-1",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: "dynamic-tool" as const,
+          toolCallId: "tool-1",
+          toolName: "search",
+          state: "output-available" as const,
+          input: { query: "cats" },
+          output: [{ title: "Cats" }],
+        },
+      ],
+    };
+
+    reconciler.reconcile(state([toolMessage]));
+
+    expect(
+      reconciler.reconcile(
+        state([
+          {
+            ...toolMessage,
+            parts: [
+              {
+                ...toolMessage.parts[0],
+                input: { query: "cats" },
+                output: [{ title: "Cats" }],
+              },
+            ],
+          },
+        ]),
+      ),
+    ).toEqual({
+      changed: false,
+      changedMessageIds: new Set(),
+    });
   });
 });

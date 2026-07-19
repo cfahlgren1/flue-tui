@@ -1,0 +1,7 @@
+{
+  "plugins": ["import"],
+  "categories": {
+    "correctness": "deny",
+    "suspicious": "deny"
+  }
+}

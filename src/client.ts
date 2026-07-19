@@ -36,11 +36,7 @@ export function createConnection(options: ConnectionOptions) {
       return client.agents.wait(admission, waitOptions);
     },
     observe(observeOptions: AgentConversationObserveOptions = {}) {
-      return client.agents.observe(
-        options.agent,
-        options.id,
-        observeOptions,
-      );
+      return client.agents.observe(options.agent, options.id, observeOptions);
     },
     history(historyOptions: FlueConversationHistoryOptions = {}) {
       return client.agents.history(options.agent, options.id, historyOptions);

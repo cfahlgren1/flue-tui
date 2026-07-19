@@ -2,9 +2,6 @@
   "name": "demo-agent",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=22.19.0"
-  },
   "scripts": {
     "dev": "flue dev --port 3583",
     "typecheck": "tsc --noEmit"
@@ -18,5 +15,8 @@
     "@flue/cli": "1.0.0-beta.9",
     "@types/node": "^22",
     "typescript": "^5.6"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

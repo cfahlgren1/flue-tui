@@ -12,12 +12,9 @@ import {
   FetchError,
 } from "@flue/sdk";
 import type {
-  AgentConversationObservation,
   AgentSendResult,
   ConversationStreamChunk,
   FlueConversationMessage,
-  FlueConversationSnapshot,
-  FlueConversationState,
 } from "@flue/sdk";
 
 import { generateId } from "../args.js";
@@ -28,18 +25,17 @@ import {
 } from "../client.js";
 import { createChatUi, type ChatUi } from "../ui/app.js";
 import { helpLines, isToolDisplayMode } from "../ui/commands.js";
-import { createReconciler } from "../ui/reconcile.js";
 import type { ToolDisplayMode } from "../ui/tool-block.js";
-import {
-  errorMessage,
-  formatPostAdmissionWaitError,
-} from "../wait-error.js";
+import { errorMessage, formatPostAdmissionWaitError } from "../wait-error.js";
+import { createChatSession, type ChatSession } from "./chat-session.js";
 
 interface LocalWait {
   controller: AbortController;
   interrupted: boolean;
   submissionId?: string;
 }
+
+const noop = () => undefined;
 
 export interface ChatCommandOptions extends ConnectionOptions {
   tools: ToolDisplayMode;
@@ -57,12 +53,6 @@ interface ChatControllerOptions<TBlock> {
 export interface ChatCommandDependencies<TBlock> {
   connectionFactory?: (options: ConnectionOptions) => FlueConnection;
   uiFactory: (options: ChatCommandOptions) => ChatUi<TBlock>;
-}
-
-type Conversation = FlueConversationSnapshot | FlueConversationState;
-
-function messageFingerprint(message: FlueConversationMessage): string {
-  return JSON.stringify(message.parts);
 }
 
 function isCompletedAssistantMessage(
@@ -104,132 +94,29 @@ export function createChatController<TBlock>({
     await delay(milliseconds, undefined, { signal });
   },
 }: ChatControllerOptions<TBlock>) {
-  let currentId = options.id;
-  let connection = initialConnection;
+  let session: ChatSession = createChatSession({
+    id: options.id,
+    url: options.url,
+    connection: initialConnection,
+    ui,
+  });
   let localWait: LocalWait | undefined;
-  let observation: AgentConversationObservation | undefined;
-  let removeObservationListener: () => void = () => undefined;
-  let removeInputListener: () => void = () => undefined;
+  let removeInputListener: () => void = noop;
   let finish!: (code: number) => void;
-  let reconciler = createReconciler(ui.reconcileUi);
-  let renderedMessageFingerprints = new Map<string, string>();
-  let reachedServer = false;
-  let reconnecting = false;
-  let reachabilityNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const clearReachabilityNoticeTimer = () => {
-    if (reachabilityNoticeTimer !== undefined) {
-      clearTimeout(reachabilityNoticeTimer);
-      reachabilityNoticeTimer = undefined;
-    }
-  };
-
-  const rememberRenderedConversation = (conversation: Conversation) => {
-    renderedMessageFingerprints = new Map(
-      conversation.messages.map((message) => [
-        message.id,
-        messageFingerprint(message),
-      ]),
-    );
-  };
-
-  const closeObservation = () => {
-    clearReachabilityNoticeTimer();
-    if (reconnecting) {
-      reconnecting = false;
-      ui.setReconnecting(false);
-    }
-    removeObservationListener();
-    removeObservationListener = () => undefined;
-    observation?.close();
-    observation = undefined;
-  };
 
   const done = new Promise<number>((resolve) => {
     finish = (code) => {
       removeInputListener();
-      closeObservation();
+      session.closeObservation();
       ui.setBusy(false);
       ui.stop();
       resolve(code);
     };
   });
 
-  const openObservation = (showResumeNotice: boolean) => {
-    const nextObservation = connection.observe({ live: "sse" });
-    let resumeNoticePending = showResumeNotice;
-    let reportedError: Error | undefined;
-    observation = nextObservation;
-    removeObservationListener = nextObservation.subscribe(() => {
-      if (observation !== nextObservation) {
-        return;
-      }
-
-      const snapshot = nextObservation.getSnapshot();
-      if (snapshot.conversation !== undefined) {
-        reachedServer = true;
-        reconciler.reconcile(snapshot.conversation);
-        rememberRenderedConversation(snapshot.conversation);
-        ui.requestRender();
-        if (resumeNoticePending) {
-          resumeNoticePending = false;
-          ui.addNotice(
-            `resumed session ${currentId} (${snapshot.conversation.messages.length} messages)`,
-          );
-        }
-      } else if (snapshot.phase === "absent") {
-        reachedServer = true;
-        resumeNoticePending = false;
-      }
-
-      if (snapshot.phase === "connecting" && snapshot.error !== undefined) {
-        if (!reconnecting) {
-          reconnecting = true;
-          ui.setReconnecting(true);
-          if (reachedServer) {
-            ui.addNotice("connection lost — retrying");
-          } else {
-            reachabilityNoticeTimer = setTimeout(() => {
-              reachabilityNoticeTimer = undefined;
-              const latest = nextObservation.getSnapshot();
-              if (
-                observation === nextObservation &&
-                reconnecting &&
-                !reachedServer &&
-                latest.phase === "connecting" &&
-                latest.error !== undefined
-              ) {
-                ui.addNotice(
-                  `cannot reach ${new URL(options.url).origin} — retrying`,
-                );
-              }
-            }, 2_000);
-          }
-        }
-      } else if (snapshot.phase === "live" || snapshot.phase === "absent") {
-        reachedServer = true;
-        clearReachabilityNoticeTimer();
-        if (reconnecting) {
-          reconnecting = false;
-          ui.setReconnecting(false);
-        }
-      }
-
-      if (
-        snapshot.phase === "error" &&
-        snapshot.error !== undefined &&
-        snapshot.error !== reportedError
-      ) {
-        reportedError = snapshot.error;
-        ui.addNotice(`observation failed: ${errorMessage(snapshot.error)}`);
-      }
-    });
-  };
-
   const recoverSubmission = async (
     wait: LocalWait,
-    waitConnection: typeof connection,
-    waitId: string,
+    waitSession: ChatSession,
     submissionId: string,
   ) => {
     try {
@@ -238,16 +125,12 @@ export function createChatController<TBlock>({
       return;
     }
 
-    if (
-      wait.interrupted ||
-      currentId !== waitId ||
-      connection !== waitConnection
-    ) {
+    if (wait.interrupted || session !== waitSession) {
       return;
     }
 
     try {
-      const snapshot = await waitConnection.history({
+      const snapshot = await waitSession.connection.history({
         signal: wait.controller.signal,
       });
       const completedSettlement = snapshot.settlements.some(
@@ -260,25 +143,23 @@ export function createChatController<TBlock>({
           isCompletedAssistantMessage(message),
       );
 
-      if (
-        !completedSettlement ||
-        recoveredMessage === undefined ||
-        renderedMessageFingerprints.get(recoveredMessage.id) ===
-          messageFingerprint(recoveredMessage)
-      ) {
+      if (!completedSettlement || recoveredMessage === undefined) {
         return;
       }
 
-      closeObservation();
-      reconciler.reconcile(snapshot);
-      rememberRenderedConversation(snapshot);
+      const result = waitSession.reconcile(snapshot);
+      if (!result.changedMessageIds.has(recoveredMessage.id)) {
+        return;
+      }
+
+      waitSession.closeObservation();
       if (recoveredMessage.metadata?.usage !== undefined) {
         ui.recordUsage(recoveredMessage.metadata.usage);
       }
       ui.addRecoveredMarker();
-      openObservation(false);
+      waitSession.openObservation(false);
     } catch (error) {
-      if (!wait.interrupted && currentId === waitId) {
+      if (!wait.interrupted && session === waitSession) {
         ui.addNotice(`recovery refresh failed: ${errorMessage(error)}`);
       }
     }
@@ -290,8 +171,7 @@ export function createChatController<TBlock>({
       interrupted: false,
     };
     localWait = wait;
-    const waitConnection = connection;
-    const waitId = currentId;
+    const waitSession = session;
     ui.setBusy(true);
 
     let admission: AgentSendResult | undefined;
@@ -300,17 +180,17 @@ export function createChatController<TBlock>({
       | undefined;
 
     try {
-      admission = await waitConnection.send(message, {
+      admission = await waitSession.connection.send(message, {
         signal: wait.controller.signal,
       });
       wait.submissionId = admission.submissionId;
-      if (observation !== undefined) {
-        const phase = observation.getSnapshot().phase;
+      if (waitSession.observation !== undefined) {
+        const phase = waitSession.observation.getSnapshot().phase;
         if (phase === "absent" || phase === "loading") {
-          observation.refresh();
+          waitSession.observation.refresh();
         }
       }
-      const result = await waitConnection.wait(admission, {
+      const result = await waitSession.connection.wait(admission, {
         signal: wait.controller.signal,
         onEvent: (event) => {
           if (
@@ -325,7 +205,7 @@ export function createChatController<TBlock>({
     } catch (error) {
       if (!wait.interrupted) {
         if (admission !== undefined) {
-          const observedSettlement = observation
+          const observedSettlement = waitSession.observation
             ?.getSnapshot()
             .conversation?.settlements.find(
               (value) => value.submissionId === admission?.submissionId,
@@ -333,19 +213,14 @@ export function createChatController<TBlock>({
           ui.addNotice(
             formatPostAdmissionWaitError({
               agent: options.agent,
-              id: waitId,
+              id: waitSession.id,
               submissionId: admission.submissionId,
               settlement: settlement ?? observedSettlement,
               error,
             }),
           );
           if (isTransportWaitError(error)) {
-            await recoverSubmission(
-              wait,
-              waitConnection,
-              waitId,
-              admission.submissionId,
-            );
+            await recoverSubmission(wait, waitSession, admission.submissionId);
           }
         } else {
           ui.addNotice(`error: ${errorMessage(error)}`);
@@ -376,45 +251,47 @@ export function createChatController<TBlock>({
   };
 
   const startNewSession = () => {
-    const previousId = currentId;
+    const previousSession = session;
     if (localWait !== undefined) {
       cancelLocalWait(false);
       localWait = undefined;
       ui.setBusy(false);
     }
 
-    closeObservation();
-    currentId = generateId();
-    connection = connectionFactory({ ...options, id: currentId });
-    reconciler = createReconciler(ui.reconcileUi);
-    renderedMessageFingerprints.clear();
+    previousSession.closeObservation();
+    const nextId = generateId();
+    session = createChatSession({
+      id: nextId,
+      url: options.url,
+      connection: connectionFactory({ ...options, id: nextId }),
+      ui,
+    });
     ui.clearTranscript();
     ui.resetUsage();
-    ui.setId(currentId);
-    openObservation(false);
+    ui.setId(session.id);
+    session.openObservation(false);
     ui.addNotice(
-      `new session ${currentId} — previous session ${previousId} keeps running server-side; ` +
-        `resume it with --id ${previousId}`,
+      `new session ${session.id} — previous session ${previousSession.id} keeps running server-side; ` +
+        `resume it with --id ${previousSession.id}`,
     );
   };
 
   const abortSession = async () => {
-    const abortedId = currentId;
-    const abortedConnection = connection;
+    const abortedSession = session;
     cancelLocalWait(false);
 
     try {
-      const result = await abortedConnection.abort();
-      if (currentId !== abortedId) {
+      const result = await abortedSession.connection.abort();
+      if (session !== abortedSession) {
         return;
       }
       ui.addNotice(
         result.aborted
-          ? `remote abort requested for session ${abortedId}`
-          : `session ${abortedId} had no running or queued work to abort`,
+          ? `remote abort requested for session ${abortedSession.id}`
+          : `session ${abortedSession.id} had no running or queued work to abort`,
       );
     } catch (error) {
-      if (currentId === abortedId) {
+      if (session === abortedSession) {
         ui.addNotice(`abort failed: ${errorMessage(error)}`);
       }
     }
@@ -436,7 +313,7 @@ export function createChatController<TBlock>({
           ui.addNotice(line);
         }
       } else if (command === "/id") {
-        ui.addNotice(`agent ${options.agent}, session ${currentId}`);
+        ui.addNotice(`agent ${options.agent}, session ${session.id}`);
       } else if (command === "/new") {
         startNewSession();
       } else if (command === "/abort") {
@@ -462,7 +339,7 @@ export function createChatController<TBlock>({
     void sendMessage(message);
   };
 
-  openObservation(options.resume);
+  session.openObservation(options.resume);
 
   removeInputListener = ui.readLoop({
     onSubmit: (message, editor) => {
@@ -515,9 +392,7 @@ export function createChatController<TBlock>({
   return { run: () => done };
 }
 
-export function runChatCommand(
-  options: ChatCommandOptions,
-): Promise<number>;
+export function runChatCommand(options: ChatCommandOptions): Promise<number>;
 export function runChatCommand<TBlock>(
   options: ChatCommandOptions,
   dependencies: ChatCommandDependencies<TBlock>,

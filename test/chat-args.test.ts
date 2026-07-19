@@ -47,9 +47,7 @@ describe("resolveInvocation", () => {
   });
 
   it("routes a second positional to send", () => {
-    expect(
-      resolveInvocation(["demo", "hello", "--id", "one"]),
-    ).toMatchObject({
+    expect(resolveInvocation(["demo", "hello", "--id", "one"])).toMatchObject({
       kind: "send",
       agent: "demo",
       id: "one",

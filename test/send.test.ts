@@ -2,10 +2,7 @@ import type { AgentPromptResponse, AgentSendResult } from "@flue/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FlueConnection } from "../src/client.js";
-import {
-  formatSendResult,
-  runSendCommand,
-} from "../src/commands/send.js";
+import { formatSendResult, runSendCommand } from "../src/commands/send.js";
 
 const admission: AgentSendResult = {
   streamUrl: "https://flue.example.test/stream",

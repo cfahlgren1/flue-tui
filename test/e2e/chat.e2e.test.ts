@@ -245,7 +245,8 @@ describeE2e("chat against a live flue server", () => {
     await waitUntil(
       () =>
         textRows(headless).filter(
-          (row) => row.role === "assistant" && row.text.includes("done rolling:"),
+          (row) =>
+            row.role === "assistant" && row.text.includes("done rolling:"),
         ).length === 2,
       "both server-side turns",
     );

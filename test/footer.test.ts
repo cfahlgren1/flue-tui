@@ -9,11 +9,7 @@ import {
   StatusFooter,
 } from "../src/ui/footer.js";
 
-function usage(
-  input: number,
-  output: number,
-  totalCost: number,
-): PromptUsage {
+function usage(input: number, output: number, totalCost: number): PromptUsage {
   return {
     input,
     output,
@@ -94,8 +90,6 @@ describe("status footer", () => {
 
     footer.resetUsage();
 
-    expect(footer.render(200).join("\n")).toContain(
-      "↑ 0 ↓ 0 · $0.0000",
-    );
+    expect(footer.render(200).join("\n")).toContain("↑ 0 ↓ 0 · $0.0000");
   });
 });

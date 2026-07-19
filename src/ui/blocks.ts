@@ -86,10 +86,6 @@ export class ReasoningBlock extends Container {
 
 export class NoticeBlock extends Text {
   constructor(text: string) {
-    super(
-      theme.notice(sanitizeText(text).replace(/\s+/g, " ").trim()),
-      1,
-      1,
-    );
+    super(theme.notice(sanitizeText(text).replace(/\s+/g, " ").trim()), 1, 1);
   }
 }

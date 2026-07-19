@@ -10,7 +10,9 @@ import { sanitizeText } from "./ui/sanitize.js";
 
 const { version: VERSION } = createRequire(import.meta.url)(
   "../package.json",
-) as { version: string };
+) as {
+  version: string;
+};
 
 export {
   generateId,

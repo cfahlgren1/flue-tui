@@ -27,8 +27,7 @@ describe("parseCliArgs", () => {
 
   it("accepts --server and its -s alias", () => {
     expect(
-      parseCliArgs(["demo", "--server", "https://flue.example.test/api"])
-        .url,
+      parseCliArgs(["demo", "--server", "https://flue.example.test/api"]).url,
     ).toBe("https://flue.example.test/api");
     expect(parseCliArgs(["demo", "-s", "http://localhost:4000"]).url).toBe(
       "http://localhost:4000",
@@ -37,18 +36,14 @@ describe("parseCliArgs", () => {
 
   it("defaults tool blocks to collapsed and accepts full or hidden", () => {
     expect(parseCliArgs(["demo"]).tools).toBe("collapsed");
-    expect(parseCliArgs(["demo", "--tools", "full"]).tools).toBe(
-      "full",
-    );
-    expect(parseCliArgs(["demo", "--tools", "hidden"]).tools).toBe(
-      "hidden",
-    );
+    expect(parseCliArgs(["demo", "--tools", "full"]).tools).toBe("full");
+    expect(parseCliArgs(["demo", "--tools", "hidden"]).tools).toBe("hidden");
   });
 
   it("rejects invalid tool display modes", () => {
-    expect(() =>
-      parseCliArgs(["demo", "--tools", "verbose"]),
-    ).toThrow("expected collapsed, full, or hidden");
+    expect(() => parseCliArgs(["demo", "--tools", "verbose"])).toThrow(
+      "expected collapsed, full, or hidden",
+    );
   });
 
   it("parses repeated headers and preserves equals signs in values", () => {
@@ -86,12 +81,7 @@ describe("parseCliArgs", () => {
   it("prefers --token over FLUE_TOKEN", () => {
     vi.stubEnv("FLUE_TOKEN", "env-secret");
 
-    const args = parseCliArgs([
-      "demo",
-      "hello",
-      "--token",
-      "cli-secret",
-    ]);
+    const args = parseCliArgs(["demo", "hello", "--token", "cli-secret"]);
 
     expect(args.token).toBe("cli-secret");
   });
@@ -99,9 +89,9 @@ describe("parseCliArgs", () => {
   it.each(["not-a-url", "ftp://flue.example.test", "file:///tmp/flue.sock"])(
     "rejects the invalid URL %s",
     (url) => {
-      expect(() =>
-        parseCliArgs(["demo", "--server", url]),
-      ).toThrow(/http\(s\) URL/);
+      expect(() => parseCliArgs(["demo", "--server", url])).toThrow(
+        /http\(s\) URL/,
+      );
     },
   );
 
@@ -110,9 +100,9 @@ describe("parseCliArgs", () => {
     "https://user:secret@flue.example.test",
     "https://:secret@flue.example.test",
   ])("rejects URL credentials in %s", (url) => {
-    expect(() =>
-      parseCliArgs(["demo", "--server", url]),
-    ).toThrow("must not include credentials");
+    expect(() => parseCliArgs(["demo", "--server", url])).toThrow(
+      "must not include credentials",
+    );
   });
 
   it("rejects empty agent and instance ids", () => {
@@ -140,10 +130,7 @@ describe("main", () => {
     ["unknown option", ["--unknown"]],
     ["too many positionals", ["demo", "hello", "extra"]],
     ["invalid URL", ["demo", "--server", "not-a-url"]],
-    [
-      "URL credentials",
-      ["demo", "--server", "https://user:secret@flue.test"],
-    ],
+    ["URL credentials", ["demo", "--server", "https://user:secret@flue.test"]],
     ["chat --json", ["demo", "--json"]],
     ["send --tools", ["demo", "hello", "--tools", "full"]],
   ])("returns exit code 2 for %s", async (_name, args) => {
@@ -190,11 +177,7 @@ describe("main", () => {
       .mockImplementation(() => true);
 
     await expect(
-      main([
-        "demo",
-        "--server",
-        "https://user:secret@flue.test",
-      ]),
+      main(["demo", "--server", "https://user:secret@flue.test"]),
     ).resolves.toBe(2);
     expect(String(write.mock.calls[0]?.[0])).not.toContain("secret");
   });

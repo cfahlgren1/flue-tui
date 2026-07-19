@@ -21,7 +21,9 @@ describe("chat commands", () => {
       ["/"],
       0,
       1,
-      { signal: new AbortController().signal },
+      {
+        signal: new AbortController().signal,
+      },
     );
 
     expect(suggestions?.items.map((item) => item.value)).toEqual([

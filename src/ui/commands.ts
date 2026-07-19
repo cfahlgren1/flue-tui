@@ -23,7 +23,10 @@ export const CHAT_COMMANDS = [
     description: "set the tool display mode",
     getArgumentCompletions(argumentPrefix: string): AutocompleteItem[] {
       return TOOL_MODES.filter((mode) => mode.startsWith(argumentPrefix)).map(
-        (mode) => ({ value: mode, label: mode }),
+        (mode) => ({
+          value: mode,
+          label: mode,
+        }),
       );
     },
   },

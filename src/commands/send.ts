@@ -227,11 +227,11 @@ export async function runSendCommand({
   } catch (error) {
     progress.finish();
     if (interrupted) {
-      const message =
+      const interruptionNotice =
         admission === undefined
           ? "interrupted before server admission could be confirmed"
           : "interrupted — agent keeps running server-side";
-      process.stderr.write(`${chalk.dim(message)}\n`);
+      process.stderr.write(`${chalk.dim(interruptionNotice)}\n`);
       return 130;
     }
     throw error;
