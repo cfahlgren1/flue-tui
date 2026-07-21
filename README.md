@@ -6,13 +6,8 @@ An interactive terminal chat for any [Flue](https://flueframework.com) agent —
 
 ## Install
 
-The npm package is not published yet. Until the first release, install it from source:
-
 ```sh
-git clone https://github.com/cfahlgren1/flue-tui.git
-cd flue-tui
-corepack enable pnpm && pnpm install --frozen-lockfile
-pnpm build && npm link
+npm install --global flue-tui
 ```
 
 Requires Node.js 22.19+ and a running Flue app with an agent that exports `route`.
