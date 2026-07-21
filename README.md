@@ -4,10 +4,25 @@ An interactive terminal chat for any [Flue](https://flueframework.com) agent —
 
 ![flue-tui demo](https://raw.githubusercontent.com/cfahlgren1/flue-tui/main/demo.gif)
 
-## Install
+## Quick start
+
+Run it once without installing:
+
+```sh
+npx flue-tui@latest demo
+```
+
+Or with pnpm:
+
+```sh
+pnpm dlx flue-tui@latest demo
+```
+
+Install it globally if you use it regularly:
 
 ```sh
 npm install --global flue-tui
+flue-tui demo
 ```
 
 Requires Node.js 22.19+ and a running Flue app with an agent that exports `route`.
