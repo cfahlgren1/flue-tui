@@ -18,6 +18,8 @@ Or with pnpm:
 pnpm dlx flue-tui@latest demo
 ```
 
+`demo` is the Flue agent name; replace it with the agent your app exports. Without `--server`, every invocation connects to `http://127.0.0.1:3583`. Pass `--server https://your-app.example` to connect elsewhere.
+
 Install it globally if you use it regularly:
 
 ```sh
