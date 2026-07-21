@@ -16,9 +16,12 @@
   },
   "license": "Apache-2.0",
   "author": "Caleb Fahlgren",
-  "repository": "https://github.com/cfahlgren1/flue-tui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cfahlgren1/flue-tui.git"
+  },
   "bin": {
-    "flue-tui": "./dist/index.js"
+    "flue-tui": "dist/index.js"
   },
   "files": [
     "dist"
